@@ -1,6 +1,7 @@
 from ursina import *
 import random
 import math
+from ships import AVAILABLE_SHIPS
 
 
 class IntroCinematic(Entity):
@@ -28,14 +29,11 @@ class IntroCinematic(Entity):
         self.skip_btn.on_click = self.skip_cinematic
 
         # 2. ACTOR DOBLE (DUMMY)
-        self.dummy_ship = Entity(model='assets/nave1/SpaceShip.obj', color=color.white, scale=(0.2, 0.2, 0.2),
-                                 enabled=False)
-
+        # Lo configuraremos en play() en base al ship_id del player
+        self.dummy_ship = Entity(model=None, enabled=False)
+        self.dummy_ship_model = Entity(parent=self.dummy_ship, model='cube')
+        
         self.dummy_thrusters = []
-        for offset_x in [-0.6, 0.6]:
-            t = Entity(parent=self.dummy_ship, model='sphere', color=color.cyan, scale=(0.3, 0.3, 3.5),
-                       position=(offset_x, -0.15, 1.1))
-            self.dummy_thrusters.append(t)
 
         # 3. PORTAL HEXAGONAL
         self.portal = Entity(model=Cylinder(resolution=6), color=color.rgba(0, 255, 255, 180), scale=(0, 0.01, 0),
@@ -56,6 +54,22 @@ class IntroCinematic(Entity):
         self.top_bar.enabled = True
         self.bottom_bar.enabled = True
         self.subtitle.enabled = True
+        
+        # Configurar el Dummy en base al Player
+        config = AVAILABLE_SHIPS.get(self.player.ship_id, AVAILABLE_SHIPS["nave1"])
+        self.dummy_ship_model.model = config.model
+        self.dummy_ship_model.color = config.ship_color
+        self.dummy_ship_model.scale = config.scale
+        self.dummy_ship_model.rotation = getattr(config, 'model_rotation_offset', (0,0,0))
+        
+        for t in self.dummy_thrusters:
+            destroy(t)
+        self.dummy_thrusters.clear()
+        
+        for offset in config.thruster_offsets:
+            t = Entity(parent=self.dummy_ship, model='sphere', color=color.cyan, scale=config.thruster_scale, position=offset)
+            self.dummy_thrusters.append(t)
+            
         self.dummy_ship.enabled = True
         self.portal.enabled = True
         self.skip_btn.enabled = True

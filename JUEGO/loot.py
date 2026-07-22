@@ -95,6 +95,8 @@ class MeteoriteFragment(Entity):
                     added = self.player.inventory.logic.add_item(self.material_data['name'], 1)
                     if added:
                         self.player.inventory.update_ui()
+                        if hasattr(self.player, 'mission_manager'):
+                            self.player.mission_manager.increment_mission('sec_02')
                 if hasattr(self, 'pool'):
                     self.pool.return_object(self)
                 else:

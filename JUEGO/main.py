@@ -3,6 +3,7 @@ from player import PlayerShip
 from environment import AsteroidManager, CosmicBackground, SpaceDustManager
 from menu import MainMenu
 from cinematics import IntroCinematic
+from ship_tuner import ShipTuner
 from menu import MainMenu, GameSettings
 from achievements import AchievementManager
 from accounts import AccountMenu
@@ -170,6 +171,10 @@ class GlobalInputController(Entity):
         if key == 'f11':
             window.fullscreen = not window.fullscreen
             
+        if key == 'f12':
+            if hasattr(self.game, 'ship_tuner'):
+                self.game.ship_tuner.enabled = not self.game.ship_tuner.enabled
+                
         if key == 'p':
             if (self.game.game_over_menu.enabled
                     or self.game.main_menu.ui_container.enabled
@@ -306,6 +311,8 @@ class GameApp:
         
         from cinematics import PlanetAnalysisCinematic
         self.player.planet_cinematic = PlanetAnalysisCinematic(self.player)
+        
+        self.ship_tuner = ShipTuner(self.player)
         from missions import MissionManager
         self.mission_manager = MissionManager(player=self.player)
         self.player.mission_manager = self.mission_manager # Pasar referencia al jugador
@@ -344,7 +351,7 @@ class GameApp:
         self.main_menu.ui_container.enable()
         self.main_menu.bg_container.enable()
 
-    def start_actual_game(self):
+    def start_actual_game(self, ship_id="nave1"):
         window.color = color.black
         
         # Aplicar ajustes gráficos
@@ -365,6 +372,7 @@ class GameApp:
         self.environment.clear_and_respawn()
         
         self.achievement_manager.reset_run()
+        self.player.change_ship(ship_id)
         self.player.reset_ship()
         
         # Iniciar Misiones
@@ -372,27 +380,34 @@ class GameApp:
         self.mission_manager.add_mission(
             id="main_01",
             title="Investiga la Anomalía",
-            description="Llega a la cima del Planeta Fracturado y analízalo usando [X].",
+            description="Llega a la cima del Planeta Fracturado y analízalo usando el escáner incorporado en tu nave para descifrar su origen.",
+            short_description="Analiza la cima del Planeta Fracturado.",
             target_pos=Vec3(291, 1130, 2193),
             is_main=True
         )
         self.mission_manager.add_mission(
             id="sec_01",
-            title="Minería Espacial",
-            description="Extrae 15 cristales de iterio y 20 de titanio destruyendo meteoros ricos.",
-            is_main=False
+            title="Limpieza Orbital",
+            description="El sector está plagado de asteroides inestables. Destruye 25 asteroides pequeños para despejar la ruta de navegación.",
+            short_description="Destruye 25 asteroides pequeños.",
+            is_main=False,
+            max_progress=25
         )
         self.mission_manager.add_mission(
             id="sec_02",
-            title="Control de Sector",
-            description="Intercepta y destruye 25 meteoros colosales que amenazan el sector.",
-            is_main=False
+            title="Recolector de Recursos",
+            description="Destruye asteroides para encontrar y extraer 15 fragmentos de minerales raros que nos servirán para mejorar la nave.",
+            short_description="Extrae 15 fragmentos minerales.",
+            is_main=False,
+            max_progress=15
         )
         self.mission_manager.add_mission(
             id="sec_03",
             title="Exploración Profunda",
-            description="Navega 15,000 metros a través de los escombros del cuadrante.",
-            is_main=False
+            description="Navega 15,000 metros a través de los peligrosos escombros del cuadrante para cartografiar la zona de forma segura.",
+            short_description="Navega 15,000 metros.",
+            is_main=False,
+            max_progress=15000
         )
         
         self.mission_manager.ui.enable()
@@ -434,7 +449,10 @@ class GameApp:
         camera.position = (0, 0, 0)
         camera.rotation = (0, 0, 0)
         self.main_menu.enable()
-        self.main_menu.reset_menu_state()
+        self.main_menu.ui_container.enable()
+        self.main_menu.bg_container.enable()
+        if hasattr(self.main_menu, 'ship_menu'):
+            self.main_menu.ship_menu.disable()
         mouse.locked = False
 
     def restart_game(self):

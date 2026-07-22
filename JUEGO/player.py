@@ -1,4 +1,5 @@
 from ursina import *
+from ships import AVAILABLE_SHIPS
 from weapons import DualLaser
 from map import TacticalMap
 from ai_companion_manager import CompanionManager
@@ -139,6 +140,9 @@ class TacticalScanner:
                     if dist_sq <= scan_radius_sq:
                         dist = dist_sq ** 0.5
                         asteroids_in_range.append((dist, entity))
+                        
+                        if getattr(entity, 'is_planet', False) and hasattr(self.player, 'mission_manager'):
+                            self.player.mission_manager.complete_mission('main_01')
 
         asteroids_in_range.sort(key=lambda x: x[0])
         top_targets = asteroids_in_range[:self.max_targets]
@@ -213,11 +217,16 @@ class TacticalScanner:
             self.current_popup.fade_and_destroy()
             self.current_popup = None
 
-
 class PlayerShip(Entity):
-    def __init__(self, game_over_menu=None, game_app=None, **kwargs):
-        super().__init__(model='assets/nave1/SpaceShip.obj', color=color.white, scale=(0.2, 0.2, 0.2),
-                         position=(0, 0, 0), collider='box', **kwargs)
+    def __init__(self, game_over_menu=None, game_app=None, ship_id="nave1", **kwargs):
+        self.ship_id = ship_id
+        config = AVAILABLE_SHIPS.get(ship_id, AVAILABLE_SHIPS["nave1"])
+        
+        super().__init__(model=None, position=(0, 0, 0), **kwargs)
+        self.collider = BoxCollider(self, center=Vec3(0,0,0), size=Vec3(*config.scale))
+        
+        self.ship_model_entity = Entity(parent=self, model=config.model, color=config.ship_color, 
+                                        scale=config.scale, rotation=getattr(config, 'model_rotation_offset', (0,0,0)))
 
         self.game_over_menu = game_over_menu
         self.game_app = game_app
@@ -240,21 +249,200 @@ class PlayerShip(Entity):
         self.error_spawn_timer = 0.0
         self.speed_line_timer = 0.0
 
-        self.right_laser_offset = (3.5, -0.5, -5.5)
-        self.left_laser_offset = (-3.5, -0.5, -5.5)
+        self.thrusters = []
+        self.scanner = TacticalScanner(self)
+        self.tactical_map = TacticalMap(self)
+        self.inventory = InventoryUI(self)
+        self.upgrades_ui = UpgradesUI(self)
+        
+        self.camera_pivot = Entity(parent=self)
+        camera.parent = self.camera_pivot
+        
+        self.ai_companion = CompanionManager()
+
+        self.camera_modes = [(0, 1.0, -9), (0, 1.5, -14), (0, 2.5, -20)]
+        self.current_cam_index = 1
+        camera.position = self.camera_modes[self.current_cam_index]
+        camera.rotation = (0, 0, 0)
+        self.base_fov = camera.fov
+        mouse.locked = True
+
+        self.hud_container = Entity(parent=camera.ui)
+
+        self.cine_text = Text(parent=camera.ui, text='', origin=(0, 0), position=(0, 0.15), scale=2,
+                              color=color.rgba(255, 255, 255, 0), enabled=False, z=-5)
+        self.oob_warning = Text(parent=self.hud_container, text='', position=(0, 0.22), origin=(0, 0), scale=1.6,
+                                enabled=False, z=-2)
+
+        self.damage_flash_overlay = Entity(parent=self.hud_container, model='quad', color=color.rgba(255, 0, 0, 0),
+                                           scale=(99, 99), z=-1.5)
+
+        self.hud_borders = []
+        self.hud_borders.append(
+            Entity(parent=self.hud_container, model='quad', color=color.rgba(255, 0, 0, 0), scale=(0.04, 2.0),
+                   position=(window.left.x + 0.02, 0), z=-1.4))
+        self.hud_borders.append(
+            Entity(parent=self.hud_container, model='quad', color=color.rgba(255, 0, 0, 0), scale=(0.04, 2.0),
+                   position=(window.right.x - 0.02, 0), z=-1.4))
+        self.hud_borders.append(
+            Entity(parent=self.hud_container, model='quad', color=color.rgba(255, 0, 0, 0), scale=(2.0, 0.04),
+                   position=(0, window.top.y - 0.02), z=-1.4))
+        self.hud_borders.append(
+            Entity(parent=self.hud_container, model='quad', color=color.rgba(255, 0, 0, 0), scale=(2.0, 0.04),
+                   position=(0, window.bottom.y + 0.02), z=-1.4))
+
+        self.crosshair = Entity(parent=self.hud_container, model='circle', color=color.rgba(255, 255, 255, 200),
+                                scale=(0.006, 0.006), position=(0, 0), z=-1)
+
+        self.blackhole_icon = Entity(parent=self.hud_container, model='quad', color=color.rgba(150, 0, 200, 255),
+                                     scale=(0.06, 0.06), position=(0, -0.42), z=-1)
+        self.blackhole_text = Text(parent=self.hud_container, text='L.B.', position=(0, -0.42), origin=(0, 0), scale=1,
+                                   color=color.white, z=-1.1)
+
+        self.dash_icons = []
+        self.dash_base_x = -0.05
+        for i in range(2):
+            icon = Entity(parent=self.hud_container, model='quad', color=color.rgba(0, 255, 255, 255),
+                          scale=(0.04, 0.04), position=(self.dash_base_x + i * 0.1, -0.42), z=-1)
+            Text(parent=icon, text='>>', origin=(0, 0), scale=12, color=color.white, z=-0.1)
+            self.dash_icons.append(icon)
+
+        self.screen_cracks = []
+        for _ in range(8):
+            crack = Entity(parent=self.hud_container, model='quad', color=color.rgba(200, 230, 255, 140),
+                           scale=(random.uniform(0.15, 0.45), 0.003),
+                           position=(random.uniform(-0.6, 0.6), random.uniform(-0.4, 0.4)),
+                           rotation_z=random.uniform(0, 360), enabled=False, z=-2)
+            self.screen_cracks.append(crack)
+
+        self.warning_text = Text(parent=self.hud_container, text='¡PELIGRO: NAVE INVERTIDA!', position=(0, 0.35),
+                                 origin=(0, 0), color=color.red, scale=1.5, enabled=False)
+
+        # BRÚJULA TÁCTICA
+        self.compass_bg = Entity(parent=self.hud_container, position=(0, 0.43), z=-1)
+        self.compass_marker = Entity(parent=self.hud_container, model='quad', color=color.cyan, scale=(0.003, 0.016),
+                                     position=(0, 0.45), z=-1.1)
+
+        self.compass_points = [
+            ('N', 0), ('30', 30), ('NE', 45), ('60', 60),
+            ('E', 90), ('120', 120), ('SE', 135), ('150', 150),
+            ('S', 180), ('210', 210), ('SW', 225), ('240', 240),
+            ('W', 270), ('300', 300), ('NW', 315), ('330', 330)
+        ]
+
+        self.compass_labels = []
+        for label, angle in self.compass_points:
+            if label in ['N', 'S', 'E', 'W']:
+                base_c = color.cyan
+            elif label in ['NE', 'SE', 'SW', 'NW']:
+                base_c = color.white
+            else:
+                base_c = color.light_gray
+
+            t = Text(parent=self.hud_container, text=label, scale=0.8, color=base_c, origin=(0, 0), z=-1.2,
+                     enabled=False)
+            self.compass_labels.append((t, angle))
+
+        self.waypoint_compass_marker = Entity(parent=self.hud_container, model='triangle', color=color.yellow,
+                                              scale=(0.015, 0.015), position=(0, 0.46), z=-1.3, rotation_z=180,
+                                              enabled=False)
+        self.waypoint_compass_dist = Text(parent=self.hud_container, text='0m', scale=0.7, color=color.yellow,
+                                          origin=(0, 0), position=(0, 0.40), z=-1.3, enabled=False)
+
+        # TACÓMETRO E INSTRUMENTAL
+        tacho_center_x = window.right.x - 0.15
+        tacho_center_y = -0.32
+        self.tacho_bg = Entity(parent=self.hud_container, model='circle', color=color.hex('#111111'), scale=0.25,
+                               position=(tacho_center_x, tacho_center_y), z=1)
+        self.tacho_needle = Entity(parent=self.tacho_bg, model='quad', color=color.hex('#ff3333'), scale=(0.02, 0.45),
+                                   origin=(0, -0.5), position=(0, 0), rotation_z=-130, z=-0.1)
+        Entity(parent=self.tacho_bg, model='circle', color=color.black, scale=0.15, z=-0.2)
+
+        Text(parent=self.hud_container, text='0', position=(tacho_center_x - 0.08, tacho_center_y - 0.08),
+             origin=(0, 0), scale=0.9, color=color.light_gray, z=-1)
+        Text(parent=self.hud_container, text='1200', position=(tacho_center_x - 0.09, tacho_center_y + 0.02),
+             origin=(0, 0), scale=0.9, color=color.light_gray, z=-1)
+        Text(parent=self.hud_container, text='2200', position=(tacho_center_x - 0.04, tacho_center_y + 0.08),
+             origin=(0, 0), scale=0.9, color=color.light_gray, z=-1)
+        Text(parent=self.hud_container, text='3200', position=(tacho_center_x + 0.04, tacho_center_y + 0.08),
+             origin=(0, 0), scale=0.9, color=color.light_gray, z=-1)
+        Text(parent=self.hud_container, text='4200', position=(tacho_center_x + 0.09, tacho_center_y + 0.02),
+             origin=(0, 0), scale=0.9, color=color.light_gray, z=-1)
+        Text(parent=self.hud_container, text='5000', position=(tacho_center_x + 0.08, tacho_center_y - 0.08),
+             origin=(0, 0), scale=0.9, color=color.red, z=-1)
+
+        self.speedometer = Text(parent=self.hud_container, text='0', position=(tacho_center_x, tacho_center_y + 0.02),
+                                origin=(0, 0), scale=3, color=color.white, z=-1)
+        Text(parent=self.hud_container, text='KM/H', position=(tacho_center_x, tacho_center_y - 0.04), origin=(0, 0),
+             scale=1.0, color=color.gray, z=-1)
+
+        self.inventory_open_sound = Audio('assets/sounds/ui/open_inventory.mp3', loop=False, autoplay=False, volume=0.8)
+        
+        self.session_distance = 0.0
+        self.bottom_hud = Entity(parent=self.hud_container, position=(0, -0.42))
+        Text(parent=self.bottom_hud, text='ESCUDO', position=(-0.25, 0.02), scale=0.8, color=color.cyan,
+             origin=(0.5, 0))
+        self.shield_bar_bg = Entity(parent=self.bottom_hud, model='quad', color=color.hex('#0a0f14'), alpha=0.8,
+                                    scale=(0.22, 0.01), position=(-0.14, 0), z=0)
+        self.shield_bar = Entity(parent=self.shield_bar_bg, model='quad', color=color.cyan, scale=(1, 1),
+                                 origin=(0.5, 0), position=(0.5, 0), z=-0.01)
+
+        Text(parent=self.bottom_hud, text='TURBO', position=(0.25, 0.02), scale=0.8, color=color.orange,
+             origin=(-0.5, 0))
+        self.boost_bar_bg = Entity(parent=self.bottom_hud, model='quad', color=color.hex('#0a0f14'), alpha=0.8,
+                                   scale=(0.22, 0.01), position=(0.14, 0), z=0)
+        self.boost_bar = Entity(parent=self.boost_bar_bg, model='quad', color=color.orange, scale=(1, 1),
+                                origin=(-0.5, 0), position=(-0.5, 0), z=-0.01)
+
+        self.base_fire_rate = 0.45
+        self.min_fire_rate = 0.08
+        self.current_fire_rate = self.base_fire_rate
+        self.fire_timer = 0
+        self.heat = 0
+        self.max_heat = 100
+        self.overheated = False
+
+        self.heat_widget = Entity(parent=self.hud_container, position=(0.02, -0.02), enabled=False)
+        self.heat_bar_bg = Entity(parent=self.heat_widget, model='quad', color=color.rgba(0, 0, 0, 150),
+                                  scale=(0.06, 0.008), rotation_z=-20)
+        self.heat_bar = Entity(parent=self.heat_bar_bg, model='quad', color=color.orange, scale=(0, 1),
+                               origin=(-0.5, 0), position=(-0.5, 0))
+        self.overheat_text = Text(parent=self.heat_widget, text='! ALERTA TERMICA !', color=color.red, scale=0.8,
+                                  position=(0.04, -0.02), enabled=False)
+
+        self.apply_config(config)
+
+    def change_ship(self, ship_id):
+        self.ship_id = ship_id
+        config = AVAILABLE_SHIPS.get(ship_id, AVAILABLE_SHIPS["nave1"])
+        self.ship_model_entity.model = config.model
+        self.ship_model_entity.color = config.ship_color
+        self.ship_model_entity.scale = config.scale
+        self.ship_model_entity.rotation = getattr(config, 'model_rotation_offset', (0,0,0))
+        self.collider = BoxCollider(self, center=Vec3(0,0,0), size=Vec3(*config.scale))
+        self.apply_config(config)
+        
+    def apply_config(self, config):
+        self.right_laser_offset = config.laser_offsets[1]
+        self.left_laser_offset = config.laser_offsets[0]
+        self.laser_scale = getattr(config, 'laser_scale', (0.2, 0.2, 2.0))
         self.laser_level = 1
         self.vacuum_level = 0
 
         self.target_speed = 0
         self.current_speed = 0
-        self.normal_max_speed = 70
+        self.normal_max_speed = config.max_speed
         
         self.turbo_level = 1
-        self.boost_max_speed = 255 + (self.turbo_level - 1) * 20
-        self.acceleration = 1.5
-        self.friction = 0.8
+        self.boost_max_speed = config.boost_max_speed + (self.turbo_level - 1) * 20
+        self.acceleration = config.acceleration
+        self.friction = config.friction
         self.mouse_sensitivity = 60
         self.roll_speed = 220
+        self.max_boost = 100 + (self.turbo_level - 1) * 50
+        self.boost_fuel = self.max_boost
+        
+        # Los propulsores se reconstruyen al final de apply_config
 
         self.auto_level_timer = 0
         self.auto_level_delay = 0.8
@@ -290,163 +478,23 @@ class PlayerShip(Entity):
 
         self.sector_radius = 2500
         self.oob_timer = 10.0
-
-        self.thrusters = []
-        self.scanner = TacticalScanner(self)
-        self.tactical_map = TacticalMap(self)
-        self.inventory = InventoryUI(self)
-        self.upgrades_ui = UpgradesUI(self)
-
+        
         # OPTIMIZACIÓN: Pre-calculamos los colores de los motores
         self.color_boost = color.rgb(0, 255, 255)
         self.color_w = color.cyan
         self.color_s = color.blue
         self.color_idle = color.rgba(0, 180, 255, 120)
-
-        for offset_x in [-0.6, 0.6]:
-            t = Entity(parent=self, model='sphere', color=self.color_idle, scale=(0.2, 0.2, 0.6),
-                       position=(offset_x, -0.15, 1.1))
+        
+        # Reposition thrusters
+        for t in self.thrusters:
+            destroy(t)
+        self.thrusters.clear()
+        
+        for offset in config.thruster_offsets:
+            t = Entity(parent=self, model='sphere', color=color.cyan, scale=config.thruster_scale, position=offset)
             self.thrusters.append(t)
 
-        self.camera_pivot = Entity(parent=self)
-        camera.parent = self.camera_pivot
-        
-        self.ai_companion = CompanionManager()
 
-        self.camera_modes = [(0, 1.0, -9), (0, 1.5, -14), (0, 2.5, -20)]
-        self.current_cam_index = 1
-        camera.position = self.camera_modes[self.current_cam_index]
-        camera.rotation = (0, 0, 0)
-        self.base_fov = camera.fov
-        mouse.locked = True
-
-        self.hud_container = Entity(parent=camera.ui)
-
-        self.cine_text = Text(parent=camera.ui, text='', origin=(0, 0), position=(0, 0.15), scale=2,
-                              color=color.rgba(255, 255, 255, 0), enabled=False, z=-5)
-        self.oob_warning = Text(parent=self.hud_container, text='', position=(0, 0.22), origin=(0, 0), scale=1.6,
-                                enabled=False, z=-2)
-
-        self.damage_flash_overlay = Entity(parent=self.hud_container, model='quad', color=color.rgba(255, 0, 0, 0),
-                                           scale=(99, 99), z=-1.5)
-
-        self.hud_borders = []
-        self.hud_borders.append(
-            Entity(parent=self.hud_container, model='quad', color=color.rgba(255, 0, 0, 0), scale=(0.04, 2.0),
-                   position=(window.left.x + 0.02, 0), z=-1.4))
-        self.hud_borders.append(
-            Entity(parent=self.hud_container, model='quad', color=color.rgba(255, 0, 0, 0), scale=(0.04, 2.0),
-                   position=(window.right.x - 0.02, 0), z=-1.4))
-        self.hud_borders.append(
-            Entity(parent=self.hud_container, model='quad', color=color.rgba(255, 0, 0, 0), scale=(2.0, 0.04),
-                   position=(0, 0.48), z=-1.4))
-        self.hud_borders.append(
-            Entity(parent=self.hud_container, model='quad', color=color.rgba(255, 0, 0, 0), scale=(2.0, 0.04),
-                   position=(0, -0.48), z=-1.4))
-
-        self.screen_cracks = []
-        for _ in range(8):
-            crack = Entity(parent=self.hud_container, model='quad', color=color.rgba(200, 230, 255, 140),
-                           scale=(random.uniform(0.15, 0.45), 0.003),
-                           position=(random.uniform(-0.6, 0.6), random.uniform(-0.4, 0.4)),
-                           rotation_z=random.uniform(0, 360), enabled=False, z=-2)
-            self.screen_cracks.append(crack)
-
-        self.crosshair = Entity(parent=self.hud_container, model='quad', color=color.rgba(255, 255, 255, 200),
-                                scale=(0.006, 0.006), position=(0, 0))
-        self.warning_text = Text(parent=self.hud_container, text='¡PELIGRO: NAVE INVERTIDA!', position=(0, 0.35),
-                                 origin=(0, 0), color=color.red, scale=1.5, enabled=False)
-
-        # BRÚJULA TÁCTICA
-        self.compass_bg = Entity(parent=self.hud_container, position=(0, 0.43), z=-1)
-        self.compass_marker = Entity(parent=self.hud_container, model='quad', color=color.cyan, scale=(0.003, 0.016),
-                                     position=(0, 0.45), z=-1.1)
-
-        self.compass_points = [
-            ('N', 0), ('30', 30), ('NE', 45), ('60', 60),
-            ('E', 90), ('120', 120), ('SE', 135), ('150', 150),
-            ('S', 180), ('210', 210), ('SW', 225), ('240', 240),
-            ('W', 270), ('300', 300), ('NW', 315), ('330', 330)
-        ]
-
-        self.compass_labels = []
-        for label, angle in self.compass_points:
-            # OPTIMIZACIÓN: Le damos el color base desde el inicio
-            if label in ['N', 'S', 'E', 'W']:
-                base_c = color.cyan
-            elif label in ['NE', 'SE', 'SW', 'NW']:
-                base_c = color.white
-            else:
-                base_c = color.light_gray
-
-            t = Text(parent=self.hud_container, text=label, scale=0.8, color=base_c, origin=(0, 0), z=-1.2,
-                     enabled=False)
-            self.compass_labels.append((t, angle))
-
-        # Marcadores del Waypoint en la Brújula
-        self.waypoint_compass_marker = Entity(parent=self.hud_container, model='triangle', color=color.yellow,
-                                              scale=(0.015, 0.015), position=(0, 0.46), z=-1.3, rotation_z=180,
-                                              enabled=False)
-        self.waypoint_compass_dist = Text(parent=self.hud_container, text='0m', scale=0.7, color=color.yellow,
-                                          origin=(0, 0), position=(0, 0.40), z=-1.3, enabled=False)
-
-        # TACÓMETRO E INSTRUMENTAL
-        tacho_center_x = window.right.x - 0.15
-        tacho_center_y = -0.32
-        self.tacho_bg = Entity(parent=self.hud_container, model='circle', color=color.hex('#111111'), scale=0.25,
-                               position=(tacho_center_x, tacho_center_y), z=1)
-        self.tacho_needle = Entity(parent=self.tacho_bg, model='quad', color=color.hex('#ff3333'), scale=(0.02, 0.45),
-                                   origin=(0, -0.5), position=(0, 0), rotation_z=-130, z=-0.1)
-        Entity(parent=self.tacho_bg, model='circle', color=color.black, scale=0.15, z=-0.2)
-
-        Text(parent=self.hud_container, text='0', position=(tacho_center_x - 0.08, tacho_center_y - 0.08),
-             origin=(0, 0), scale=0.9, color=color.light_gray, z=-1)
-        Text(parent=self.hud_container, text='1200', position=(tacho_center_x - 0.09, tacho_center_y + 0.02),
-             origin=(0, 0), scale=0.9, color=color.light_gray, z=-1)
-        Text(parent=self.hud_container, text='2200', position=(tacho_center_x - 0.04, tacho_center_y + 0.08),
-             origin=(0, 0), scale=0.9, color=color.light_gray, z=-1)
-        Text(parent=self.hud_container, text='3200', position=(tacho_center_x + 0.04, tacho_center_y + 0.08),
-             origin=(0, 0), scale=0.9, color=color.light_gray, z=-1)
-        Text(parent=self.hud_container, text='4200', position=(tacho_center_x + 0.09, tacho_center_y + 0.02),
-             origin=(0, 0), scale=0.9, color=color.light_gray, z=-1)
-        Text(parent=self.hud_container, text='5000', position=(tacho_center_x + 0.08, tacho_center_y - 0.08),
-             origin=(0, 0), scale=0.9, color=color.red, z=-1)
-
-        self.speedometer = Text(parent=self.hud_container, text='0', position=(tacho_center_x, tacho_center_y + 0.02),
-                                origin=(0, 0), scale=3, color=color.white, z=-1)
-        Text(parent=self.hud_container, text='KM/H', position=(tacho_center_x, tacho_center_y - 0.04), origin=(0, 0),
-             scale=1.0, color=color.gray, z=-1)
-
-        self.bottom_hud = Entity(parent=self.hud_container, position=(0, -0.42))
-        Text(parent=self.bottom_hud, text='ESCUDO', position=(-0.25, 0.02), scale=0.8, color=color.cyan,
-             origin=(0.5, 0))
-        self.shield_bar_bg = Entity(parent=self.bottom_hud, model='quad', color=color.hex('#0a0f14'), alpha=0.8,
-                                    scale=(0.22, 0.01), position=(-0.14, 0), z=0)
-        self.shield_bar = Entity(parent=self.shield_bar_bg, model='quad', color=color.cyan, scale=(1, 1),
-                                 origin=(0.5, 0), position=(0.5, 0), z=-0.01)
-
-        Text(parent=self.bottom_hud, text='TURBO', position=(0.25, 0.02), scale=0.8, color=color.orange,
-             origin=(-0.5, 0))
-        self.boost_bar_bg = Entity(parent=self.bottom_hud, model='quad', color=color.hex('#0a0f14'), alpha=0.8,
-                                   scale=(0.22, 0.01), position=(0.14, 0), z=0)
-        self.boost_bar = Entity(parent=self.boost_bar_bg, model='quad', color=color.orange, scale=(1, 1),
-                                origin=(-0.5, 0), position=(-0.5, 0), z=-0.01)
-
-        self.base_fire_rate = 0.45
-        self.min_fire_rate = 0.08
-        self.current_fire_rate = self.base_fire_rate
-        self.fire_timer = 0
-        self.heat = 0
-        self.max_heat = 100
-        self.overheated = False
-
-        self.heat_widget = Entity(parent=self.hud_container, position=(0.02, -0.02), enabled=False)
-        self.heat_bar_bg = Entity(parent=self.heat_widget, model='quad', color=color.rgba(0, 0, 0, 150),
-                                  scale=(0.06, 0.008), rotation_z=-20)
-        self.heat_bar = Entity(parent=self.heat_bar_bg, model='quad', color=color.orange, scale=(0, 1),
-                               origin=(-0.5, 0), position=(-0.5, 0))
-        self.overheat_text = Text(parent=self.heat_widget, text='! ALERTA TERMICA !', color=color.red, scale=0.8,
-                                  position=(0.04, -0.02), enabled=False)
 
     def cracks_on_damage(self):
         disabled_cracks = [c for c in self.screen_cracks if not c.enabled]
@@ -828,7 +876,11 @@ class PlayerShip(Entity):
         target_fov = self.base_fov + (speed_ratio * 35.0)
         camera.fov = lerp(camera.fov, target_fov, time.dt * 5)
 
-        self.position += self.forward * self.current_speed * time.dt
+        self.velocity = self.forward * self.current_speed
+        self.position += self.velocity * time.dt
+        self.session_distance += self.current_speed * time.dt
+        if hasattr(self, 'mission_manager'):
+            self.mission_manager.set_mission_progress('sec_03', int(self.session_distance))
 
         if is_boosting:
             target_scale_z = random.uniform(3.5, 4.8)
@@ -933,6 +985,10 @@ class PlayerShip(Entity):
                 self.rotation_z += self.roll_speed * time.dt
                 self.auto_level_timer = self.auto_level_delay
                 base_z_target = self.rotation_z
+            elif held_keys['r']:
+                self.rotation_z += self.roll_speed * time.dt
+                self.auto_level_timer = self.auto_level_delay
+                base_z_target = self.rotation_z
             else:
                 target_z = round(self.rotation_z / 360) * 360
                 if not held_keys['right mouse']:
@@ -1013,17 +1069,17 @@ class PlayerShip(Entity):
             if pool:
                 pool.get_object(DualLaser, self.position, true_aim_rotation, self.forward, self.right, self.up,
                                 offset_x=self.right_laser_offset[0], offset_y=self.right_laser_offset[1],
-                                offset_z=self.right_laser_offset[2], damage_level=laser_dmg, owner=self)
+                                offset_z=self.right_laser_offset[2], damage_level=laser_dmg, owner=self, laser_scale=self.laser_scale)
                 pool.get_object(DualLaser, self.position, true_aim_rotation, self.forward, self.right, self.up,
                                 offset_x=self.left_laser_offset[0], offset_y=self.left_laser_offset[1],
-                                offset_z=self.left_laser_offset[2], damage_level=laser_dmg, owner=self)
+                                offset_z=self.left_laser_offset[2], damage_level=laser_dmg, owner=self, laser_scale=self.laser_scale)
             else:
                 DualLaser(self.position, true_aim_rotation, self.forward, self.right, self.up,
                           offset_x=self.right_laser_offset[0], offset_y=self.right_laser_offset[1],
-                          offset_z=self.right_laser_offset[2], damage_level=laser_dmg)
+                          offset_z=self.right_laser_offset[2], damage_level=laser_dmg, owner=self, laser_scale=self.laser_scale)
                 DualLaser(self.position, true_aim_rotation, self.forward, self.right, self.up,
                           offset_x=self.left_laser_offset[0], offset_y=self.left_laser_offset[1],
-                          offset_z=self.left_laser_offset[2], damage_level=laser_dmg)
+                          offset_z=self.left_laser_offset[2], damage_level=laser_dmg, owner=self, laser_scale=self.laser_scale)
 
             self.shake_amount = clamp(self.shake_amount + 0.2, 0, 0.6)
             

@@ -56,23 +56,26 @@ class DualLaser(Entity):
         offset_y = kwargs.pop('offset_y', 0)
         offset_z = kwargs.pop('offset_z', 0)
         damage_level = kwargs.pop('damage_level', 1)
+        laser_scale = kwargs.pop('laser_scale', (0.2, 0.2, 2.0))
         
         super().__init__(
             model='cube',
             color=color.red,
             unlit=True,
-            scale=(0.2, 0.2, 2),
-            collider='box',
+            scale=laser_scale,
             **kwargs
         )
-        self.reset(*args, offset_x=offset_x, offset_y=offset_y, offset_z=offset_z, damage_level=damage_level, owner=self.owner)
+        
+        self.reset(*args, offset_x=offset_x, offset_y=offset_y, offset_z=offset_z, damage_level=damage_level, owner=self.owner, laser_scale=laser_scale)
 
     def reset(self, ship_position, ship_rotation, ship_forward, ship_right, ship_up, offset_x=0, offset_y=0, offset_z=0, damage_level=1, owner=None, **kwargs):
         self.owner = owner
         self.damage_level = damage_level
-        self.position = ship_position + (ship_right * offset_x) + (ship_up * offset_y) + (ship_forward * offset_z)
+        self.center_offset = (ship_right * offset_x) + (ship_up * offset_y)
+        self.position = ship_position + self.center_offset + (ship_forward * offset_z)
         self.rotation = ship_rotation
-        self.speed = 120
+        self.scale = kwargs.get('laser_scale', (0.2, 0.2, 2.0))
+        self.speed = 280
         self.lifetime = 2.0
         self.age = 0.0
 
@@ -85,12 +88,41 @@ class DualLaser(Entity):
 
         # Calculamos cuánto va a avanzar el láser en este exacto frame
         distancia_avance = self.speed * time.dt
+        
+        # Guardamos la posición actual como origen del boxcast
+        origen = self.position
+        
+        # Movemos el láser visualmente
+        self.position += self.forward * distancia_avance
 
-        # RAYCASTING: Disparamos un rayo invisible hacia adelante para ver si golpearemos algo
-        hit_info = raycast(self.position, self.forward, distance=distancia_avance + (self.scale_z / 2), ignore=(self,))
+        # Usar un boxcast perforante. Si choca con algo que no es asteroide (como botín), 
+        # lo ignora y vuelve a lanzar el rayo en el mismo frame para no ser bloqueado.
+        virtual_center = origen - getattr(self, 'center_offset', Vec3(0,0,0))
+        remaining_dist = distancia_avance + (self.scale_z / 2)
+        ignore_list = [self, getattr(self, 'owner', None)]
+        
+        hit_asteroid = None
+        
+        for _ in range(5): # Máximo 5 perforaciones por frame por seguridad
+            hit_info = boxcast(
+                origin=virtual_center, 
+                direction=self.forward, 
+                distance=remaining_dist, 
+                thickness=(4.0, 4.0), 
+                ignore=ignore_list
+            )
+            
+            if hit_info.hit:
+                if hasattr(hit_info.entity, 'is_asteroid'):
+                    hit_asteroid = hit_info.entity
+                    break
+                else:
+                    ignore_list.append(hit_info.entity)
+            else:
+                break
 
-        if hit_info.hit and hasattr(hit_info.entity, 'is_asteroid'):
-            impact_position = hit_info.entity.position
+        if hit_asteroid:
+            impact_position = hit_asteroid.position
 
             from weapons import ExplosionParticle
             for _ in range(random.randint(15, 25)):
@@ -101,17 +133,14 @@ class DualLaser(Entity):
 
             # Aplicar daño múltiple según nivel de láser
             for _ in range(self.damage_level):
-                if hit_info.entity and hit_info.entity.enabled:
-                    hit_info.entity.split()
+                if hit_asteroid and hit_asteroid.enabled:
+                    hit_asteroid.split()
             if hasattr(self, 'owner') and self.owner and getattr(self.owner, 'achievements', None):
-                self.owner.achievements.register_asteroid_destroyed(hit_info.entity)
+                self.owner.achievements.register_asteroid_destroyed(hit_asteroid)
             if hasattr(self, 'pool'):
                 self.pool.return_object(self)
             else:
                 destroy(self)
-        else:
-            # Si no hay nada en el camino, avanzamos de forma normal
-            self.position += self.forward * distancia_avance
 
 class BlackHoleProjectile(Entity):
     def __init__(self, ship_position, camera_forward, **kwargs):

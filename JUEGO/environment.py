@@ -128,6 +128,9 @@ class Asteroid(Entity):
             # Soltar 1 o 2 fragmentos
             for _ in range(random.randint(1, 2)):
                 MeteoriteFragment(self.manager.player, self.position, self.mat_data)
+                
+        if getattr(self.manager, 'player', None) and hasattr(self.manager.player, 'mission_manager'):
+            self.manager.player.mission_manager.increment_mission('sec_01')
 
         if self in self.manager.asteroids: self.manager.asteroids.remove(self)
         if hasattr(self, 'pool'):

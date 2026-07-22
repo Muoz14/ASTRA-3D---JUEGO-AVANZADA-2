@@ -3,6 +3,7 @@ import random
 import math
 from achievements import AchievementsMenu
 from score_menu import ScoreMenu
+from menu_ships import ShipSelectionMenu
 
 
 class GameSettings:
@@ -303,36 +304,40 @@ class MainMenu(Entity):
         # Interfaz de Usuario
         self.ui_container = Entity(parent=camera.ui)
 
-        self.title_text = Text(parent=self.ui_container, text='ASTRA 3D', position=(window.left.x + 0.08, 0.38), scale=5.5,
+        self.title_text = Text(parent=self.ui_container, text='ASTRA 3D', position=(0, 0.35), origin=(0, 0), scale=6,
                                color=color.white)
         self.subtitle_text = Text(parent=self.ui_container, text='SIMULADOR DE VIAJE ASTRONÁUTICO',
-                                  position=(window.left.x + 0.09, 0.27), scale=1.1, color=color.light_gray)
+                                  position=(0, 0.23), origin=(0, 0), scale=1.5, color=color.cyan)
 
-        self.btn_start = Button(parent=self.ui_container, text='INICIAR VUELO', scale=(0.4, 0.08),
-                                position=(window.left.x + 0.28, 0.14), color=color.dark_gray, highlight_color=color.gray,
+        # Main action button
+        self.btn_start = Button(parent=self.ui_container, text='INICIAR VUELO', scale=(0.4, 0.1),
+                                position=(0, 0.05), color=color.azure, highlight_color=color.cyan,
                                 on_click=self.press_start, z=-1)
-        self.btn_score = Button(parent=self.ui_container, text='PUNTUACIÓN ATLAS', scale=(0.4, 0.08),
-                                position=(window.left.x + 0.28, 0.04), color=color.dark_gray, highlight_color=color.gray,
+
+        # Horizontal button bar for other options at the bottom
+        btn_y = -0.35
+        self.btn_score = Button(parent=self.ui_container, text='PUNTUACIÓN', scale=(0.25, 0.08),
+                                position=(-0.45, btn_y), color=color.dark_gray, highlight_color=color.gray,
                                 on_click=self.press_score, z=-1)
-        self.btn_achievements = Button(parent=self.ui_container, text='LOGROS DE LA NAVE', scale=(0.4, 0.08),
-                                position=(window.left.x + 0.28, -0.06), color=color.dark_gray, highlight_color=color.gray,
+        self.btn_achievements = Button(parent=self.ui_container, text='LOGROS', scale=(0.25, 0.08),
+                                position=(-0.15, btn_y), color=color.dark_gray, highlight_color=color.gray,
                                 on_click=self.press_achievements, z=-1)
-        self.btn_options = Button(parent=self.ui_container, text='OPCIONES', scale=(0.4, 0.08),
-                                  position=(window.left.x + 0.28, -0.16), color=color.dark_gray, highlight_color=color.gray,
+        self.btn_options = Button(parent=self.ui_container, text='OPCIONES', scale=(0.25, 0.08),
+                                  position=(0.15, btn_y), color=color.dark_gray, highlight_color=color.gray,
                                   on_click=self.press_options, z=-1)
                                   
-        # Botón Cambiar Piloto con contorno rojo simulado
-        self.btn_cp_border = Entity(parent=self.ui_container, model='quad', color=color.red, scale=(0.41, 0.09), position=(window.left.x + 0.28, -0.26), z=-0.5)
-        self.btn_change_pilot = Button(parent=self.ui_container, text='CAMBIAR PILOTO', scale=(0.4, 0.08),
-                                  position=(window.left.x + 0.28, -0.26), color=color.dark_gray, highlight_color=color.gray,
+        # Botón Cambiar Piloto
+        self.btn_change_pilot = Button(parent=self.ui_container, text='CAMBIAR PILOTO', scale=(0.25, 0.08),
+                                  position=(0.45, btn_y), color=color.dark_gray, highlight_color=color.gray,
                                   on_click=self.press_change_pilot, z=-1)
                                   
-        self.btn_exit = Button(parent=self.ui_container, text='SALIR DE LA EXPERIENCIA', scale=(0.4, 0.08),
-                                position=(window.left.x + 0.28, -0.36), color=color.red.tint(-0.2), highlight_color=color.red.tint(0.1),
+        self.btn_exit = Button(parent=self.ui_container, text='SALIR', scale=(0.15, 0.06),
+                                position=(window.right.x - 0.1, window.bottom.y + 0.05), color=color.red.tint(-0.2), highlight_color=color.red.tint(0.1),
                                 on_click=application.quit, z=-1)
 
         self.options_menu = OptionsMenu(main_menu=self)
         self.achievements_menu = AchievementsMenu(main_menu=self, achievement_manager=self.achievement_manager)
+        self.ship_menu = ShipSelectionMenu(main_menu=self, start_game_func=self.start_game_func)
 
         self.fade_overlay = Entity(parent=camera.ui, model='quad', color=color.rgba(0, 0, 0, 0), scale=(99, 99), z=-10,
                                    enabled=False)
@@ -346,23 +351,8 @@ class MainMenu(Entity):
                 self.pan_direction *= -1
 
     def press_start(self):
-        self.btn_start.enabled = False
-        self.btn_score.enabled = False
-        self.btn_achievements.enabled = False
-        self.btn_options.enabled = False
-        self.btn_change_pilot.enabled = False
-        self.btn_cp_border.enabled = False
-        self.btn_exit.enabled = False
-
-        self.fade_overlay.enabled = True
-        self.fade_overlay.animate_color(color.rgba(0, 0, 0, 255), duration=1.5)
-        invoke(self.execute_start, delay=1.5)
-
-    def execute_start(self):
-        self.disable()
-        self.start_game_func()
-        self.fade_overlay.animate_color(color.rgba(0, 0, 0, 0), duration=1.0)
-        invoke(self.reset_menu_state, delay=1.0)
+        self.ui_container.disable()
+        self.ship_menu.enable()
 
     def press_options(self):
         self.options_menu.open_options()
@@ -374,15 +364,8 @@ class MainMenu(Entity):
     def press_achievements(self):
         self.achievements_menu.open_achievements()
 
-    def reset_menu_state(self):
-        self.fade_overlay.enabled = False
-        self.btn_start.enabled = True
-        self.btn_score.enabled = True
-        self.btn_achievements.enabled = True
-        self.btn_options.enabled = True
-        self.btn_change_pilot.enabled = True
-        self.btn_cp_border.enabled = True
-        self.btn_exit.enabled = True
+    def align_ui(self):
+        self.btn_exit.position = (window.right.x - 0.1, window.bottom.y + 0.05)
 
     def press_score(self):
         self.score_menu.open_score()

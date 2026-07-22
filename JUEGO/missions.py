@@ -1,13 +1,22 @@
 from ursina import *
 
 class Mission:
-    def __init__(self, id, title, description, target_pos=None, is_main=True):
+    def __init__(self, id, title, description, short_description=None, target_pos=None, is_main=True, max_progress=0):
         self.id = id
         self.title = title
         self.description = description
+        self.short_description = short_description if short_description else description
         self.target_pos = target_pos # Vec3 o None
         self.is_main = is_main
         self.completed = False
+        self.current_progress = 0
+        self.max_progress = max_progress
+        
+    @property
+    def progress_text(self):
+        if self.max_progress > 0:
+            return f" [{self.current_progress}/{self.max_progress}]"
+        return ""
 
 class MissionUI(Entity):
     def __init__(self, manager, **kwargs):
@@ -85,14 +94,26 @@ class WaypointArrow(Entity):
         self.glow = Entity(parent=self.arrow, model='cone', color=color.rgba(0, 255, 255, 50), scale=1.4, unlit=True)
         
         self.distance_text = Text(parent=camera.ui, text="", scale=1.2, position=(0, 0.35), origin=(0,0), color=color.cyan)
+        
+        # Texto en la esquina inferior izquierda dinámico
+        self.secondary_text = Text(parent=camera.ui, text=" ", scale=0.9, position=(window.bottom_left.x + 0.03, -0.15), origin=(-0.5, 0), color=color.white)
+        self.secondary_text.wordwrap = 40
+        
+        # Diamante 3D en el mundo para el objetivo de la misión principal
+        self.world_diamond = Entity(model='diamond', color=color.yellow, scale=(10, 40, 10), unlit=True, enabled=False)
+        self.world_diamond.animate_rotation_y(360, duration=3.0, loop=True)
 
     def on_enable(self):
         if hasattr(self, 'distance_text'):
             self.distance_text.enabled = True
+            self.secondary_text.enabled = True
             
     def on_disable(self):
         if hasattr(self, 'distance_text'):
             self.distance_text.enabled = False
+            self.secondary_text.enabled = False
+            if hasattr(self, 'world_diamond'):
+                self.world_diamond.enabled = False
 
     def update(self):
         hide_ui = application.paused or not getattr(self.player, 'enabled', True) or getattr(self.player, 'is_cinematic', False) or getattr(self.player, 'pause_menu_open', False) or getattr(self.player.tactical_map, 'is_open', False) or getattr(self.player, 'is_dead', False)
@@ -100,57 +121,137 @@ class WaypointArrow(Entity):
         if hide_ui:
             self.arrow.enabled = False
             self.distance_text.enabled = False
+            if hasattr(self, 'world_diamond'): self.world_diamond.enabled = False
+            return
+        tracked = self.manager.get_tracked_mission()
+        
+        if hide_ui or not tracked:
+            self.arrow.enabled = False
+            self.distance_text.enabled = False
+            self.secondary_text.enabled = False
+            if hasattr(self, 'world_diamond'): self.world_diamond.enabled = False
             return
             
-        target = self.manager.get_active_target()
-        if target:
-            self.arrow.enabled = True
-            self.distance_text.enabled = True
-            
-            # Posicionarlo alto por encima de la nave para que se vea
-            self.arrow.position = self.player.world_position + Vec3(0, 25, 0) + self.player.forward * 10
-            # Oscilación suave vertical
-            self.arrow.y += math.sin(time.time() * 3) * 2.0
-            
-            # Apuntar hacia el objetivo
-            self.arrow.look_at(target)
-            
-            # Texto HUD
-            dist = int(distance(self.player.world_position, target))
-            new_text = f"OBJETIVO: {dist}m"
-            if self.distance_text.text != new_text:
-                self.distance_text.text = new_text
+        if tracked.is_main:
+            self.secondary_text.enabled = False
+            if tracked.target_pos:
+                self.arrow.enabled = True
+                self.distance_text.enabled = True
+                if hasattr(self, 'world_diamond'):
+                    self.world_diamond.enabled = True
+                    self.world_diamond.position = tracked.target_pos
+                
+                # Posicionarlo alto por encima de la nave para que se vea
+                self.arrow.position = self.player.world_position + Vec3(0, 25, 0) + self.player.forward * 10
+                # Oscilación suave vertical
+                self.arrow.y += math.sin(time.time() * 3) * 2.0
+                
+                # Apuntar hacia el objetivo
+                self.arrow.look_at(tracked.target_pos)
+                
+                # Texto HUD
+                dist = int(distance(self.player.world_position, tracked.target_pos))
+                new_text = f"OBJETIVO: {dist}m"
+                if self.distance_text.text != new_text:
+                    self.distance_text.text = new_text
+            else:
+                self.arrow.enabled = False
+                self.distance_text.enabled = False
+                if hasattr(self, 'world_diamond'): self.world_diamond.enabled = False
         else:
             self.arrow.enabled = False
             self.distance_text.enabled = False
+            if hasattr(self, 'world_diamond'): self.world_diamond.enabled = False
+            self.secondary_text.enabled = True
+            
+            # Mostrar la misión con progreso si lo tiene
+            new_text = f"> {tracked.title}{tracked.progress_text}\n\n{tracked.short_description}"
+            if self.secondary_text.text != new_text:
+                self.secondary_text.text = new_text
+            # Posicionamiento dinámico en tiempo real
+            self.secondary_text.position = (window.bottom_left.x + 0.03, -0.15)
 
 class MissionManager(Entity):
     def __init__(self, player, **kwargs):
         super().__init__(**kwargs)
         self.player = player
         self.missions = []
+        self.tracked_mission_id = None
         self.ui = MissionUI(self)
         self.waypoint = WaypointArrow(self, player)
         
         self.ui.disable() # Comienza desactivado (por ej en menú)
         self.waypoint.disable()
 
-    def add_mission(self, id, title, description, target_pos=None, is_main=True):
-        m = Mission(id, title, description, target_pos, is_main)
+    def add_mission(self, id, title, description, short_description=None, target_pos=None, is_main=True, max_progress=0):
+        m = Mission(id, title, description, short_description, target_pos, is_main, max_progress)
         self.missions.append(m)
+        if not getattr(self, 'tracked_mission_id', None) and is_main:
+            self.tracked_mission_id = id
         self.ui.update_ui()
         
+    def increment_mission(self, id, amount=1):
+        for m in self.missions:
+            if m.id == id and not m.completed:
+                m.current_progress += amount
+                if m.max_progress > 0 and m.current_progress >= m.max_progress:
+                    m.current_progress = m.max_progress
+                    self.complete_mission(id)
+                else:
+                    self.ui.show_notification(f"ACTUALIZACIÓN DE MISIÓN\n{m.title} {m.progress_text}", duration=3)
+                self.ui.update_ui()
+                return
+                
+    def set_mission_progress(self, id, progress):
+        for m in self.missions:
+            if m.id == id and not m.completed:
+                old_progress = m.current_progress
+                if m.current_progress != progress:
+                    m.current_progress = progress
+                    if m.max_progress > 0 and m.current_progress >= m.max_progress:
+                        m.current_progress = m.max_progress
+                        self.complete_mission(id)
+                    else:
+                        # Para evitar spam de notificaciones continuas (como en Exploración Profunda)
+                        # Notificamos cada cierto porcentaje o valor.
+                        if id == 'sec_03':
+                            if int(old_progress / 2500) < int(progress / 2500) and progress >= 2500:
+                                self.ui.show_notification(f"ACTUALIZACIÓN DE MISIÓN\n{m.title} {m.progress_text}m", duration=3)
+                        elif id != 'sec_03' and old_progress != progress:
+                            self.ui.show_notification(f"ACTUALIZACIÓN DE MISIÓN\n{m.title} {m.progress_text}", duration=3)
+
+                    self.ui.update_ui()
+                return
+
     def complete_mission(self, id):
         for m in self.missions:
-            if m.id == id:
+            if m.id == id and not m.completed:
                 m.completed = True
-                m.target_pos = None # Ya no apuntamos a él
-                break
-        self.ui.update_ui()
+                print(f"Misión completada: {m.title}")
+                
+                # Notificación visual
+                self.ui.show_notification(f"¡MISIÓN COMPLETADA!\n{m.title}", duration=6)
+                
+                # auto-untrack if completed and it was tracked
+                if self.tracked_mission_id == id:
+                    self.tracked_mission_id = None
+                    
+                    # Intentar rastrear la siguiente misión principal disponible, o en su defecto cualquier otra
+                    for next_m in self.missions:
+                        if not next_m.completed:
+                            self.tracked_mission_id = next_m.id
+                            break
+                            
+                self.ui.update_ui()
+                return
         
-    def get_active_target(self):
-        # Devuelve el target de la primera misión no completada que tenga target
+    def get_tracked_mission(self):
+        if not getattr(self, 'tracked_mission_id', None): return None
         for m in self.missions:
-            if not m.completed and m.target_pos:
-                return m.target_pos
+            if m.id == self.tracked_mission_id and not m.completed:
+                return m
         return None
+
+    def get_active_target(self):
+        m = self.get_tracked_mission()
+        return m.target_pos if m else None
