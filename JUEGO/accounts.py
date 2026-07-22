@@ -125,7 +125,15 @@ class AccountMenu(Entity):
         Text(parent=self, text=random.choice(tips), origin=(0, 0), position=(0, -0.33), scale=0.8, color=color.hex('#4AA3C7'), z=-0.3)
 
         self.list_container = Entity(parent=self, y=0.15)
+        
+        # Cuadro de fondo para las 3 tarjetas visibles
+        self.list_bg = Entity(parent=self, model=Quad(radius=0.015), color=color.hex('#061221'), scale=(0.74, 0.32), position=(0, 0.07), z=0.05)
+        self.list_bg_border = Entity(parent=self.list_bg, model=Quad(radius=0.015), color=color.hex('#1A3C59'), scale=(1.015, 1.03), z=0.01)
+
+        self.scroll_y = 0
+        self.spacing = 0.1
         self.buttons = []
+        self.rows = []
         
         self.build_ui()
         
@@ -157,12 +165,14 @@ class AccountMenu(Entity):
         for b in self.buttons:
             destroy(b)
         self.buttons.clear()
+        self.rows.clear()
 
         y_pos = 0.02
         
-        for acc in self.manager.accounts:
+        for idx, acc in enumerate(self.manager.accounts):
             acc_id = acc['id']
-            acc_name = acc['name']
+            # Prefijo numérico añadido al nombre
+            acc_name = f"{idx + 1}. {acc['name']}"
             
             # Fila de cuenta
             bg_row = Entity(parent=self.list_container, model=Quad(radius=0.01), color=color.hex('#0A1A2F'), scale=(0.7, 0.08), position=(0, y_pos), z=0)
@@ -171,28 +181,72 @@ class AccountMenu(Entity):
             
             b_play = Button(parent=self.list_container, text='VUELO', scale=(0.12, 0.05), position=(0.0, y_pos),
                             color=color.hex('#00EFFF').tint(-0.6), highlight_color=color.hex('#00EFFF').tint(-0.4),
-                            on_click=Func(self.select_account, acc_id, acc_name), z=-1)
+                            on_click=Func(self.select_account, acc_id, acc['name']), z=-1)
             
             b_ren = Button(parent=self.list_container, text='EDITAR', scale=(0.12, 0.05), position=(0.14, y_pos),
                            color=color.hex('#4AA3C7').tint(-0.6), highlight_color=color.hex('#4AA3C7').tint(-0.4),
-                           on_click=Func(self.prompt_rename, acc_id, acc_name), z=-1)
+                           on_click=Func(self.prompt_rename, acc_id, acc['name']), z=-1)
                            
             b_del = Button(parent=self.list_container, text='BORRAR', scale=(0.12, 0.05), position=(0.28, y_pos),
                            color=color.red.tint(-0.4), highlight_color=color.red.tint(-0.2),
                            on_click=Func(self.do_delete_and_refresh, acc_id), z=-1)
                            
             self.buttons.extend([bg_row, t, b_play, b_ren, b_del])
-            y_pos -= 0.1
+            self.rows.append({'bg': bg_row, 't': t, 'b_play': b_play, 'b_ren': b_ren, 'b_del': b_del})
+            y_pos -= self.spacing
 
+        # Botones fijos en la parte inferior de la pantalla (fuera del contenedor scrolleable)
+        fixed_y_create = -0.16
         if len(self.manager.accounts) < 5:
-            btn_crear = AccountButton('+ CREAR NUEVO PILOTO', y_pos - 0.02, self.prompt_create, accent='#00EFFF', parent_entity=self.list_container)
+            btn_crear = AccountButton('+ CREAR NUEVO PILOTO', fixed_y_create, self.prompt_create, accent='#00EFFF', parent_entity=self)
             self.buttons.append(btn_crear)
-            y_pos -= 0.1
             
-        y_pos -= 0.04
-        
-        btn_invitado = AccountButton('JUGAR COMO INVITADO', y_pos, Func(self.select_account, 'guest', 'Invitado'), accent='#6E8798', parent_entity=self.list_container)
+        fixed_y_guest = -0.26
+        btn_invitado = AccountButton('JUGAR COMO INVITADO', fixed_y_guest, Func(self.select_account, 'guest', 'Invitado'), accent='#6E8798', parent_entity=self)
         self.buttons.append(btn_invitado)
+        
+    def input(self, key):
+        if not self.enabled or self.input_layer.enabled: return
+        
+        # Scroll logic
+        max_scroll = max(0, (len(self.manager.accounts) - 1) * self.spacing)
+        
+        if key == 'scroll up':
+            self.scroll_y = max(0, self.scroll_y - (self.spacing * 2))
+        elif key == 'scroll down':
+            self.scroll_y = min(max_scroll, self.scroll_y + (self.spacing * 2))
+
+    def update(self):
+        if self.enabled:
+            # Smooth scrolling interpolation
+            self.list_container.y += (self.scroll_y + 0.15 - self.list_container.y) * 0.25
+            
+            # Simulated clipping via alpha fading
+            for r in self.rows:
+                gy = r['bg'].y + self.list_container.y
+                
+                alpha = 1.0
+                if gy > 0.20:
+                    alpha = max(0, 1.0 - (gy - 0.20) / 0.04)
+                elif gy < -0.06:
+                    alpha = max(0, 1.0 - (-0.06 - gy) / 0.04)
+                    
+                is_visible = alpha > 0
+                r['bg'].enabled = is_visible
+                r['t'].enabled = is_visible
+                r['b_play'].enabled = is_visible
+                r['b_ren'].enabled = is_visible
+                r['b_del'].enabled = is_visible
+                
+                if is_visible:
+                    r['bg'].alpha = alpha
+                    r['t'].alpha = alpha
+                    r['b_play'].alpha = alpha
+                    r['b_ren'].alpha = alpha
+                    r['b_del'].alpha = alpha
+                    r['b_play'].text_entity.alpha = alpha
+                    r['b_ren'].text_entity.alpha = alpha
+                    r['b_del'].text_entity.alpha = alpha
 
     def do_delete_and_refresh(self, acc_id):
         self.manager.delete_account(acc_id)
