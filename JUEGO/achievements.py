@@ -573,15 +573,6 @@ class AchievementManager(Entity):
         self.stats['asteroides_destruidos'] += 1
         self.unlock_by_stat('asteroides_destruidos')
 
-        material_name = getattr(asteroid, 'material_name', None)
-        tier = getattr(asteroid, 'tier', 3)
-        amount = {1: 6, 2: 3, 3: 1}.get(tier, 1)
-        if self.player and material_name and hasattr(self.player, 'inventory'):
-            if self.player.inventory.logic.add_item(material_name, amount):
-                self.register_materials(amount)
-                if getattr(self.player.inventory, 'is_open', False):
-                    self.player.inventory.update_ui()
-
     def register_materials(self, amount):
         self.stats['minerales'] += amount
         self.unlock_by_stat('minerales')

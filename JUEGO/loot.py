@@ -17,6 +17,17 @@ class MeteoriteFragment(Entity):
             scale=1.4,
             unlit=True
         )
+        # Prompt visual 3D flotante para recolección manual
+        self.prompt = Text(
+            parent=self,
+            text='',
+            position=(0, 2.5, 0),
+            scale=12,
+            color=color.hex('#6EEBFF'),
+            billboard=True,
+            enabled=False,
+            z=-1
+        )
         self.reset(player, position, material_data)
         
     def reset(self, player, position, material_data):
@@ -44,7 +55,10 @@ class MeteoriteFragment(Entity):
         # Dinámicas de movimiento
         self.rotation_speed = Vec3(random.uniform(-40, 40), random.uniform(-40, 40), random.uniform(-40, 40))
         self.velocity = Vec3(random.uniform(-1, 1), random.uniform(-1, 1), random.uniform(-1, 1)).normalized() * random.uniform(1, 3)
-        self.lifespan = 60.0 # Desaparece después de 60 segundos si no se recoge
+        self.lifespan = 30.0 # Desaparece después de 30 segundos si no se recoge
+        
+        if hasattr(self, 'prompt'):
+            self.prompt.enabled = False
         
         # Para optimizar la recolección, verificamos la distancia cada 0.1 segundos
         self.check_timer = 0
@@ -64,7 +78,22 @@ class MeteoriteFragment(Entity):
         self.aura.color = color.rgba(1, 1, 1, 0.15 + math.sin(self.aura_time * 4) * 0.05)
         
         self.lifespan -= time.dt
+        
+        # Alerta visual (parpadeo rápido en los últimos 5 segundos)
+        if self.lifespan < 5.0 and self.lifespan > 0:
+            self.visible = (int(self.lifespan * 10) % 2 == 0)
+            self.aura.visible = self.visible
+            if hasattr(self, 'prompt'):
+                self.prompt.visible = self.visible
+        else:
+            self.visible = True
+            self.aura.visible = True
+            if hasattr(self, 'prompt'):
+                self.prompt.visible = True
+
         if self.lifespan <= 0:
+            if hasattr(self, 'prompt'):
+                self.prompt.enabled = False
             if hasattr(self, 'pool'):
                 self.pool.return_object(self)
             else:
@@ -89,15 +118,31 @@ class MeteoriteFragment(Entity):
                 dir_to_player = (self.player.position - self.position).normalized()
                 self.velocity = lerp(self.velocity, dir_to_player * 15, time.dt * 4)
                 
-            # Recolección efectiva
-            if dist_sq < pickup_radius_sq:
-                if hasattr(self.player, 'inventory'):
-                    added = self.player.inventory.logic.add_item(self.material_data['name'], 1)
-                    if added:
-                        self.player.inventory.update_ui()
-                        if hasattr(self.player, 'mission_manager'):
-                            self.player.mission_manager.increment_mission('sec_02')
-                if hasattr(self, 'pool'):
-                    self.pool.return_object(self)
-                else:
-                    destroy(self)
+            # Rango de interacción para recolección manual
+            interact_radius = 25.0
+            if dist_sq < interact_radius ** 2:
+                if hasattr(self, 'prompt'):
+                    self.prompt.enabled = True
+                    simbolo = self.material_data['name'].split('(')[1].replace(')', '') if '(' in self.material_data['name'] else self.material_data['name']
+                    self.prompt.text = f"[F] Recoger {simbolo}"
+                
+                # Recolección manual mediante la tecla F
+                if held_keys['f']:
+                    if hasattr(self.player, 'inventory'):
+                        added = self.player.inventory.logic.add_item(self.material_data['name'], 1)
+                        if added:
+                            self.player.inventory.update_ui()
+                            if getattr(self.player, 'achievements', None):
+                                self.player.achievements.register_materials(1)
+                            if hasattr(self.player, 'mission_manager'):
+                                self.player.mission_manager.increment_mission('sec_02')
+                    
+                    if hasattr(self, 'prompt'):
+                        self.prompt.enabled = False
+                    if hasattr(self, 'pool'):
+                        self.pool.return_object(self)
+                    else:
+                        destroy(self)
+            else:
+                if hasattr(self, 'prompt'):
+                    self.prompt.enabled = False
