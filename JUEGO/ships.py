@@ -66,6 +66,6 @@ AVAILABLE_SHIPS = {
         thruster_scale=(0.05, 0.05, 0.1025),
         max_health=150,                   # AGUANTA MÁS GOLPES
         laser_scale=(0.8, 0.8, 12.0),     # LASERS MUCHO MÁS GRANDES
-        dummy_config=DummyConfig(scale_normal=(0.8, 0.8, 0.8), scale_large=(2.0, 2.0, 2.0))
+        dummy_config=DummyConfig(scale_normal=(0.8, 0.8, 0.8), scale_large=(4.5, 4.5, 4.5))
     )
 }

@@ -319,6 +319,7 @@ class GameApp:
 
         self.player.enabled = False
         self.space_dust.enabled = False
+        self.environment.clear_asteroids() # No mostrar asteroides en el menú
         mouse.locked = False
 
         self.player.hud_container.disable()
@@ -348,6 +349,37 @@ class GameApp:
     def on_account_selected(self, acc_id, acc_name):
         self.achievement_manager.set_account(acc_id)
         self.main_menu.current_account_id = acc_id
+        
+        # Cargar la nave guardada para este piloto
+        selected_ship = 'nave1'
+        for acc in self.account_menu.manager.accounts:
+            if acc['id'] == acc_id:
+                selected_ship = acc.get('selected_ship', 'nave1')
+                break
+                
+        # Sincronizar el menú de selección de naves
+        if hasattr(self.main_menu, 'ship_menu'):
+            try:
+                idx = self.main_menu.ship_menu.ship_keys.index(selected_ship)
+                self.main_menu.ship_menu.current_idx = idx
+            except:
+                pass
+                
+        # Actualizar la nave visual en el menú
+        # Actualizar la nave visual en el menú
+        from ships import AVAILABLE_SHIPS
+        if hasattr(self.main_menu, 'menu_ship') and selected_ship in AVAILABLE_SHIPS:
+            self.main_menu.menu_ship.set_config(AVAILABLE_SHIPS[selected_ship])
+            # Forzar la posición y rotación inmediatamente
+            self.main_menu.menu_ship.position = (5.5, -2.5, 12)
+            self.main_menu.menu_ship.rotation = (0, 7, 0)
+            
+        # Forzar el restablecimiento de la cámara a su posición por defecto en Ursina
+        camera.parent = scene
+        camera.position = (0, 0, -20)
+        camera.rotation = (0, 0, 0)
+        camera.fov = 40
+
         self.main_menu.ui_container.enable()
         self.main_menu.bg_container.enable()
 
@@ -443,14 +475,26 @@ class GameApp:
             
         self.cosmic_bg.enabled = False
         self.space_dust.enabled = False
-        self.environment.clear_and_respawn()
+        self.environment.clear_asteroids()
 
         camera.parent = scene
-        camera.position = (0, 0, 0)
+        camera.position = (0, 0, -20)
         camera.rotation = (0, 0, 0)
+        camera.fov = 40
         self.main_menu.enable()
         self.main_menu.ui_container.enable()
         self.main_menu.bg_container.enable()
+        if hasattr(self.main_menu, 'menu_ship'):
+            # Detener cualquier animación en curso para que no sobreescriba la posición al reanudar
+            if hasattr(self.main_menu.menu_ship, 'animations'):
+                for anim in self.main_menu.menu_ship.animations:
+                    anim.kill()
+                self.main_menu.menu_ship.animations.clear()
+            
+            # Asegurar que la nave vuelva a su posición original a la derecha
+            self.main_menu.menu_ship.position = (5.5, -2.5, 12)
+            self.main_menu.menu_ship.rotation = (0, 7, 0)
+            
         if hasattr(self.main_menu, 'ship_menu'):
             self.main_menu.ship_menu.disable()
         mouse.locked = False

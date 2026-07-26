@@ -69,51 +69,141 @@ class MenuSun(Entity):
         self.glow2.scale = 1.25 + math.cos(time.time() * 2) * 0.03
 
 
-class MenuPlanet(Entity):
-    """Planetas con rotación lenta y majestuosa en el fondo"""
-
-    def __init__(self, **kwargs):
-        super().__init__(model='sphere', **kwargs)
-        self.rot_speed = random.uniform(1.0, 2.5)
-
-    def update(self):
-        self.rotation_y += self.rot_speed * time.dt
-
-
-class MenuMeteor(Entity):
-    """Rocas rojizas/marrones que viajan desde muy lejos hacia la cámara"""
-
-    def __init__(self, **kwargs):
-        super().__init__(model='sphere', color=color.rgb(80, 55, 45), **kwargs)
-        self.reset_meteor()
-
-    def reset_meteor(self):
-        self.position = (random.uniform(-150, 150), random.uniform(-60, 60), random.uniform(400, 600))
-        target_pos = Vec3(random.uniform(-20, 20), random.uniform(-10, 10), -10)
-        self.direction = (target_pos - self.position).normalized()
-        self.speed = random.uniform(15, 40)
-        self.rot_speed = Vec3(random.uniform(-40, 40), random.uniform(-40, 40), random.uniform(-40, 40))
-        self.scale = random.uniform(1.0, 4.0)
-
-
-class MenuDust(Entity):
-    """Partículas de polvo estelar diminutas con movimiento y deriva constante"""
-
+class WormholeParticle(Entity):
+    """Líneas brillantes que simulan un túnel de agujero de gusano (Wormhole)."""
     def __init__(self, **kwargs):
         super().__init__(
-            model='sphere',
-            color=color.rgba(255, 255, 255, 90),
-            scale=random.uniform(0.01, 0.03),
+            model='cube', # Cambiado a cubo para evitar el warning de 'cylinder' perdido en Ursina
+            color=color.rgba(50, 150, 255, random.randint(80, 160)),
+            unlit=True,
             **kwargs
         )
-        self.speed = random.uniform(0.8, 2.5)
+        self.reset_particle()
+
+    def reset_particle(self):
+        # Nacen solo en los bordes (radio 15 a 30) para dejar el centro vacío y formar un TÚNEL
+        self.angle = random.uniform(0, math.pi * 2)
+        self.radius = random.uniform(15, 30)
+        self.position = (math.cos(self.angle) * self.radius, math.sin(self.angle) * self.radius, random.uniform(150, 300))
+        self.speed = random.uniform(150, 300)
+        
+        # Alargados en Z para simular velocidad hiperlumínica
+        self.scale = (random.uniform(0.1, 0.3), random.uniform(0.1, 0.3), random.uniform(15, 50))
+        self.rotation_z = math.degrees(self.angle)
 
     def update(self):
+        # Avanzar hacia la cámara
         self.z -= self.speed * time.dt
-        if self.z < 2:
-            self.z = random.uniform(25, 35)
-            self.x = random.uniform(-20, 20)
-            self.y = random.uniform(-12, 12)
+        
+        # Efecto de Espiral (Swirl): Rotar ligeramente alrededor del centro (0,0) en cada frame
+        swirl_speed = 0.5 * time.dt
+        new_x = self.x * math.cos(swirl_speed) - self.y * math.sin(swirl_speed)
+        new_y = self.x * math.sin(swirl_speed) + self.y * math.cos(swirl_speed)
+        self.x = new_x
+        self.y = new_y
+        self.rotation_z += 0.5 * time.dt * 50 # Girar sobre sí mismas un poco para acompañar
+        
+        if self.z < -20:
+            self.reset_particle()
+
+
+class MenuTurboEffect:
+    """Clase base polimórfica para los efectos de turbo en el menú."""
+    def spawn(self, ship):
+        pass
+
+class MenuTurboNave1(MenuTurboEffect):
+    """Efectos de turbo ágiles y rápidos para la Nave 1."""
+    def spawn(self, ship):
+        from ursina import Entity, color, random, curve, destroy
+        for offset in ship.config.thruster_offsets:
+            # Cositos blancos/celestes simulando alta velocidad
+            p = Entity(parent=ship.bob_container, model='sphere', color=color.rgba(255, 255, 255, 150), unlit=True,
+                       scale=random.uniform(0.03, 0.06), position=offset)
+            # Se alejan muy rápido hacia atrás
+            p.animate_position(p.position + (random.uniform(-0.05, 0.05), random.uniform(-0.05, 0.05), -2.5), duration=0.3, curve=curve.linear)
+            p.animate_scale(0, duration=0.3, curve=curve.linear)
+            destroy(p, delay=0.3)
+
+class MenuTurboNave2(MenuTurboEffect):
+    """Efectos de turbo masivos y pesados para el Coloso (Nave 2)."""
+    def spawn(self, ship):
+        from ursina import Entity, color, random, curve, destroy
+        for offset in ship.config.thruster_offsets:
+            # Cositos blancos/naranjas más grandes simulando potencia bruta
+            p = Entity(parent=ship.bob_container, model='sphere', color=color.rgba(255, 200, 200, 200), unlit=True,
+                       scale=random.uniform(0.06, 0.12), position=offset)
+            # Se dispersan un poco más debido a la potencia del Coloso
+            p.animate_position(p.position + (random.uniform(-0.15, 0.15), random.uniform(-0.15, 0.15), -2.0), duration=0.4, curve=curve.linear)
+            p.animate_scale(0, duration=0.4, curve=curve.linear)
+            destroy(p, delay=0.4)
+
+class MenuDummyShip(Entity):
+    """Nave dummy para el menú principal con efecto de flotación y propulsores."""
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.bob_container = Entity(parent=self)
+        self.model_entity = Entity(parent=self.bob_container)
+        self.time_offset = random.uniform(0, 10)
+        
+        # Propulsores traseros simulando aceleración máxima
+        self.thruster_glows = []
+        self.turbo_effect = None
+        self.trail_timer = 0
+
+    def set_config(self, config):
+        self.config = config
+        self.model_entity.model = config.model
+        self.model_entity.color = config.ship_color
+        self.model_entity.rotation = getattr(config, 'model_rotation_offset', (0,0,0))
+        
+        # Polimorfismo: Instanciar la estrategia de partículas correcta según la nave
+        if config.id == "nave1":
+            self.turbo_effect = MenuTurboNave1()
+        else:
+            self.turbo_effect = MenuTurboNave2()
+        
+        # Usamos la escala grande del dummy_config si existe, de lo contrario un multiplicador
+        if hasattr(config, 'dummy_config') and config.dummy_config:
+            self.scale = config.dummy_config.scale_large
+        else:
+            multiplier = 1.5
+            self.scale = (config.scale[0] * multiplier, config.scale[1] * multiplier, config.scale[2] * multiplier)
+        
+        for t in self.thruster_glows:
+            destroy(t)
+        self.thruster_glows.clear()
+        
+        # Crear propulsores brillantes adjuntos al bob_container para que floten junto con la nave
+        for offset in config.thruster_offsets:
+            local_offset = offset
+            
+            local_scale = (
+                config.thruster_scale[0] * 1.5,
+                config.thruster_scale[1] * 1.5,
+                config.thruster_scale[2] * 2.0
+            )
+            
+            glow = Entity(parent=self.bob_container, model='sphere', color=color.rgba(0, 255, 255, 200), unlit=True, scale=local_scale, position=local_offset)
+            self.thruster_glows.append(glow)
+
+    def update(self):
+        t = time.time() + self.time_offset
+        
+        # Efecto de flotación suave aplicado al contenedor interior para no pelear con animaciones de posición globales
+        self.bob_container.y = math.sin(t * 2) * 0.1
+        self.bob_container.rotation_z = math.sin(t * 1.5) * 2
+        
+        # Pulsación intensa de los propulsores
+        for glow in self.thruster_glows:
+            glow.scale_z = glow.scale_x * (2.0 + math.sin(t * 40) * 0.8)
+            
+        # Emitir partículas polimórficas de velocidad
+        self.trail_timer -= time.dt
+        if self.trail_timer <= 0:
+            if self.turbo_effect:
+                self.turbo_effect.spawn(self)
+            self.trail_timer = 0.05
 
 
 class OptionsMenu(Entity):
@@ -272,6 +362,36 @@ class OptionsMenu(Entity):
         self.main_container.enable()
 
 
+class MenuSpeedLine(Entity):
+    """Líneas de velocidad 2D para la UI del menú, simulando viaje interestelar a velocidad turbo."""
+    def __init__(self, speed_mult=1.0, origin_x=0.45, origin_y=-0.15, **kwargs):
+        # z=15 garantiza que se dibujen por detrás del panel izquierdo (que tiene z=10)
+        super().__init__(parent=camera.ui, model='quad', z=15, **kwargs)
+        self.angle = random.uniform(0, math.tau)
+        self.distance = random.uniform(0.05, 0.35) # Comienzan más cerca del centro del efecto
+        self.speed = random.uniform(3.0, 5.0) * speed_mult # Más lentas y ambientales
+        self.max_scale_y = random.uniform(0.06, 0.20) 
+        self.scale = (random.uniform(0.001, 0.002), 0.01)
+        self.rotation_z = math.degrees(self.angle) - 90
+        
+        # El centro (origen de las líneas) está desplazado dinámicamente
+        self.origin_x = origin_x
+        self.origin_y = origin_y
+        
+        self.update_position()
+
+    def update_position(self):
+        self.x = self.origin_x + math.cos(self.angle) * self.distance
+        self.y = self.origin_y + math.sin(self.angle) * self.distance
+
+    def update(self):
+        self.distance += self.speed * time.dt
+        self.scale_y = min(self.max_scale_y, self.distance * 0.5)
+        self.update_position()
+        if self.distance > 0.8: self.alpha -= time.dt * 4 # Desvanecen más lejos
+        if self.distance > 1.5 or self.alpha <= 0: destroy(self)
+
+
 class MainMenu(Entity):
     def __init__(self, start_game_func, achievement_manager, change_pilot_func=None, **kwargs):
         super().__init__(**kwargs)
@@ -283,52 +403,57 @@ class MainMenu(Entity):
 
         # Contenedor del espacio de fondo
         self.bg_container = Entity(parent=self)
+        
+        self.speed_line_timer = 0
 
-        self.sun = MenuSun(parent=self.bg_container)
-        self.planet1 = MenuPlanet(parent=self.bg_container, color=color.rgb(25, 28, 35), scale=12.0,
-                                  position=(-25, -10, 60))
-        self.planet2 = MenuPlanet(parent=self.bg_container, color=color.rgb(40, 42, 45), scale=5.0,
-                                  position=(18, -6, 40))
+        self.wormhole_container = Entity(parent=self.bg_container)
 
-        self.meteors = []
-        for _ in range(8):
-            m = MenuMeteor(parent=self.bg_container)
-            self.meteors.append(m)
+        self.wormhole_particles = []
+        for _ in range(80):
+            w = WormholeParticle(parent=self.wormhole_container)
+            self.wormhole_particles.append(w)
+            
+        # Nave Dummy en la escena 3D (centrada en el panel derecho, más cerca de la cámara)
+        from ships import AVAILABLE_SHIPS
+        self.menu_ship = MenuDummyShip(parent=self.bg_container, position=(5.5, -2.5, 12), rotation=(0, 7, 0))
+        self.menu_ship.set_config(AVAILABLE_SHIPS["nave1"])
 
-        self.dust_particles = []
-        for _ in range(140):
-            d = MenuDust(parent=self.bg_container,
-                         position=(random.uniform(-22, 22), random.uniform(-12, 12), random.uniform(4, 32)))
-            self.dust_particles.append(d)
-
-        # Interfaz de Usuario
+        # Interfaz de Usuario (Columna Izquierda)
         self.ui_container = Entity(parent=camera.ui)
+        
+        # Asegurar que el fondo general del menú sea negro
+        window.color = color.black
+        
+        # Fondo sólido para la columna izquierda
+        self.ui_bg = Entity(parent=self.ui_container, model='quad', color=color.hex('#0a0c0f'), scale=(1.0, 2), position=(-0.6, 0), z=10)
 
-        self.title_text = Text(parent=self.ui_container, text='ASTRA 3D', position=(0, 0.35), origin=(0, 0), scale=6,
+        ui_x = -0.8  # Posición X para alinear más a la izquierda y evitar desborde
+
+        self.title_text = Text(parent=self.ui_container, text='ASTRA 3D', position=(ui_x, 0.35), origin=(-0.5, 0), scale=4.5,
                                color=color.white)
         self.subtitle_text = Text(parent=self.ui_container, text='SIMULADOR DE VIAJE ASTRONÁUTICO',
-                                  position=(0, 0.23), origin=(0, 0), scale=1.5, color=color.cyan)
+                                  position=(ui_x, 0.23), origin=(-0.5, 0), scale=1.2, color=color.cyan)
 
-        # Main action button
-        self.btn_start = Button(parent=self.ui_container, text='INICIAR VUELO', scale=(0.4, 0.1),
-                                position=(0, 0.05), color=color.azure, highlight_color=color.cyan,
+        # Botones alineados verticalmente
+        btn_start_y = 0.05
+        self.btn_start = Button(parent=self.ui_container, text='INICIAR VUELO', scale=(0.4, 0.08),
+                                position=(ui_x + 0.2, btn_start_y), color=color.azure, highlight_color=color.cyan,
                                 on_click=self.press_start, z=-1)
 
-        # Horizontal button bar for other options at the bottom
-        btn_y = -0.35
-        self.btn_score = Button(parent=self.ui_container, text='PUNTUACIÓN', scale=(0.25, 0.08),
-                                position=(-0.45, btn_y), color=color.dark_gray, highlight_color=color.gray,
+        self.btn_score = Button(parent=self.ui_container, text='PUNTUACIÓN', scale=(0.4, 0.08),
+                                position=(ui_x + 0.2, btn_start_y - 0.1), color=color.dark_gray, highlight_color=color.gray,
                                 on_click=self.press_score, z=-1)
-        self.btn_achievements = Button(parent=self.ui_container, text='LOGROS', scale=(0.25, 0.08),
-                                position=(-0.15, btn_y), color=color.dark_gray, highlight_color=color.gray,
+                                
+        self.btn_achievements = Button(parent=self.ui_container, text='LOGROS', scale=(0.4, 0.08),
+                                position=(ui_x + 0.2, btn_start_y - 0.2), color=color.dark_gray, highlight_color=color.gray,
                                 on_click=self.press_achievements, z=-1)
-        self.btn_options = Button(parent=self.ui_container, text='OPCIONES', scale=(0.25, 0.08),
-                                  position=(0.15, btn_y), color=color.dark_gray, highlight_color=color.gray,
+                                
+        self.btn_options = Button(parent=self.ui_container, text='OPCIONES', scale=(0.4, 0.08),
+                                  position=(ui_x + 0.2, btn_start_y - 0.3), color=color.dark_gray, highlight_color=color.gray,
                                   on_click=self.press_options, z=-1)
                                   
-        # Botón Cambiar Piloto
-        self.btn_change_pilot = Button(parent=self.ui_container, text='CAMBIAR PILOTO', scale=(0.25, 0.08),
-                                  position=(0.45, btn_y), color=color.dark_gray, highlight_color=color.gray,
+        self.btn_change_pilot = Button(parent=self.ui_container, text='CAMBIAR PILOTO', scale=(0.4, 0.08),
+                                  position=(ui_x + 0.2, btn_start_y - 0.4), color=color.dark_gray, highlight_color=color.gray,
                                   on_click=self.press_change_pilot, z=-1)
                                   
         self.btn_exit = Button(parent=self.ui_container, text='SALIR', scale=(0.15, 0.06),
@@ -344,15 +469,31 @@ class MainMenu(Entity):
         self.pan_direction = 1
 
     def update(self):
-        """Animación de paneo suave para el fondo del menú"""
-        if self.bg_container.enabled:
-            self.bg_container.rotation_y += 0.5 * self.pan_direction * time.dt
-            if self.bg_container.rotation_y > 5 or self.bg_container.rotation_y < -5:
-                self.pan_direction *= -1
+        if self.bg_container.enabled and hasattr(self, 'menu_ship'):
+            # El túnel 3D se alinea dinámicamente con la nave, pero con un desplazamiento exagerado 
+            # a la derecha en el menú principal (multiplicador 2.5) para que el centro quede más allá de la nave.
+            # En la selección de naves (x=0), el centro sigue siendo exactamente 0.
+            self.wormhole_container.x = self.menu_ship.x * 2.5
+            self.wormhole_container.y = self.menu_ship.y
+            
+            self.speed_line_timer -= time.dt
+            if self.speed_line_timer <= 0:
+                # Calcular dinámicamente el origen de las líneas en base a la posición de la nave
+                # Cuando x=5.5 (menú principal), origin_x = 0.45. Cuando x=0 (selección de nave), origin_x = 0
+                curr_origin_x = (self.menu_ship.x / 5.5) * 0.45 if self.menu_ship.x > 0 else 0
+                
+                MenuSpeedLine(color=color.rgba(200, 240, 255, 70), origin_x=curr_origin_x) 
+                # Una secundaria ocasional para dar profundidad sin saturar
+                if random.random() < 0.3:
+                    MenuSpeedLine(color=color.rgba(100, 200, 255, 80), speed_mult=1.2, origin_x=curr_origin_x) 
+                self.speed_line_timer = 0.05
 
     def press_start(self):
         self.ui_container.disable()
-        self.ship_menu.enable()
+        # Animar la nave hacia el centro
+        self.menu_ship.animate_position((0, -2, 12), duration=0.8, curve=curve.in_out_expo)
+        self.menu_ship.animate_rotation((0, 0, 0), duration=0.8, curve=curve.in_out_expo)
+        invoke(self.ship_menu.enable, delay=0.8)
 
     def press_options(self):
         self.options_menu.open_options()

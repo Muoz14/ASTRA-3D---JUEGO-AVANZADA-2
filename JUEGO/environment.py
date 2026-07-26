@@ -172,12 +172,15 @@ class AsteroidManager(Entity):
                 a = Asteroid(self, pos, tier=tier, material_data=mat)
             self.asteroids.append(a)
 
-    def clear_and_respawn(self):
+    def clear_asteroids(self):
         for a in self.asteroids:
             if a in scene.entities:
                 if hasattr(a, 'pool'): a.pool.return_object(a)
                 else: destroy(a)
         self.asteroids.clear()
+
+    def clear_and_respawn(self):
+        self.clear_asteroids()
         self.spawn_initial_asteroids()
 
 

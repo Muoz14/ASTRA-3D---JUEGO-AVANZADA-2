@@ -3,10 +3,11 @@
         "id": "a3f3d0b7-5231-4ee6-be93-7c9532bb06e1",
         "name": "Muoz",
         "stats": {
-            "total_score": 64742,
+            "total_score": 65776,
             "high_score": 7836,
             "enemies_destroyed": 0,
-            "time_flown": 5346
-        }
+            "time_flown": 5445
+        },
+        "selected_ship": "nave2"
     }
 ]
