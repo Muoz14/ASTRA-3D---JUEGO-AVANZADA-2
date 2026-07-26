@@ -57,9 +57,10 @@ class IntroCinematic(Entity):
         
         # Configurar el Dummy en base al Player
         config = AVAILABLE_SHIPS.get(self.player.ship_id, AVAILABLE_SHIPS["nave1"])
+        self.current_config = config
         self.dummy_ship_model.model = config.model
         self.dummy_ship_model.color = config.ship_color
-        self.dummy_ship_model.scale = config.scale
+        self.dummy_ship_model.scale = config.dummy_config.scale_normal
         self.dummy_ship_model.rotation = getattr(config, 'model_rotation_offset', (0,0,0))
         
         for t in self.dummy_thrusters:
@@ -67,7 +68,7 @@ class IntroCinematic(Entity):
         self.dummy_thrusters.clear()
         
         for offset in config.thruster_offsets:
-            t = Entity(parent=self.dummy_ship, model='sphere', color=color.cyan, scale=config.thruster_scale, position=offset)
+            t = Entity(parent=self.dummy_ship_model, model='sphere', color=color.cyan, scale=config.thruster_scale, position=offset)
             self.dummy_thrusters.append(t)
             
         self.dummy_ship.enabled = True
@@ -90,7 +91,7 @@ class IntroCinematic(Entity):
         self.portal.animate_scale(Vec3(35, 0.01, 35), duration=0.8, curve=curve.out_back)
 
         self.dummy_ship.enabled = True
-        self.dummy_ship.scale = (0.5, 0.5, 0.5)
+        self.dummy_ship_model.scale = self.current_config.dummy_config.scale_large
         self.dummy_ship.position = (0, 0, -260)
         self.dummy_ship.rotation = (0, 0, 0)
 
@@ -128,7 +129,7 @@ class IntroCinematic(Entity):
     def execute_shot_3(self, sid):
         if sid != self.session_id or not self.is_playing: return
 
-        self.dummy_ship.scale = (0.2, 0.2, 0.2)
+        self.dummy_ship_model.scale = self.current_config.dummy_config.scale_normal
         self.dummy_ship.position = (0, 0, -115)
         self.dummy_ship.rotation = (0, 0, 0)
 
@@ -285,11 +286,13 @@ class IntroCinematic(Entity):
                 SpeedLine()
 
             if random.random() < 0.4:
-                for offset_x in [-0.6, 0.6]:
+                config = getattr(self, 'current_config', AVAILABLE_SHIPS["nave1"])
+                scale_x, scale_y, scale_z = self.dummy_ship_model.scale
+                for offset in config.thruster_offsets:
                     p_pos = (self.dummy_ship.position +
-                             (self.dummy_ship.right * offset_x) +
-                             (self.dummy_ship.up * -0.15) +
-                             (self.dummy_ship.forward * 1.1))
+                             (self.dummy_ship.right * offset[0] * scale_x) +
+                             (self.dummy_ship.up * offset[1] * scale_y) +
+                             (self.dummy_ship.forward * offset[2] * scale_z))
 
                     p = Entity(model='sphere', color=color.rgba(0, 255, 255, 120), scale=random.uniform(0.08, 0.25),
                                position=p_pos)

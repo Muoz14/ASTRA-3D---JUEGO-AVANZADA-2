@@ -491,7 +491,9 @@ class PlayerShip(Entity):
         self.thrusters.clear()
         
         for offset in config.thruster_offsets:
-            t = Entity(parent=self, model='sphere', color=color.cyan, scale=config.thruster_scale, position=offset)
+            scaled_offset = (offset[0] * config.scale[0], offset[1] * config.scale[1], offset[2] * config.scale[2])
+            scaled_thruster = (config.thruster_scale[0] * config.scale[0], config.thruster_scale[1] * config.scale[1], config.thruster_scale[2] * config.scale[2])
+            t = Entity(parent=self, model='sphere', color=color.cyan, scale=scaled_thruster, position=scaled_offset)
             self.thrusters.append(t)
 
 
@@ -504,10 +506,11 @@ class PlayerShip(Entity):
     def generate_trail(self):
         self.trail_timer -= time.dt
         if self.trail_timer <= 0:
-            for offset_x in [-0.6, 0.6]:
+            config = AVAILABLE_SHIPS.get(self.ship_id, AVAILABLE_SHIPS["nave1"])
+            for offset in config.thruster_offsets:
                 for _ in range(2):
-                    direccion_expulsion = 1 if offset_x > 0 else -1
-                    trail_pos = self.position + (self.right * offset_x) + (self.up * -0.15) + (self.forward * 1.1)
+                    direccion_expulsion = 1 if offset[0] > 0 else -1
+                    trail_pos = self.position + (self.right * offset[0] * config.scale[0]) + (self.up * offset[1] * config.scale[1]) + (self.forward * offset[2] * config.scale[2])
                     pool = getattr(self.game_app, 'pool', None) if hasattr(self, 'game_app') else None
                     if pool:
                         p = pool.get_object(Entity, pool_key="TrailParticle", model='sphere', color=color.rgba(0, 255, 255, 50), position=trail_pos)
@@ -1067,19 +1070,23 @@ class PlayerShip(Entity):
             pool = getattr(self.game_app, 'pool', None) if hasattr(self, 'game_app') else None
             
             if pool:
+                config = AVAILABLE_SHIPS.get(self.ship_id, AVAILABLE_SHIPS["nave1"])
+                scale_x, scale_y, scale_z = config.scale
                 pool.get_object(DualLaser, self.position, true_aim_rotation, self.forward, self.right, self.up,
-                                offset_x=self.right_laser_offset[0], offset_y=self.right_laser_offset[1],
-                                offset_z=self.right_laser_offset[2], damage_level=laser_dmg, owner=self, laser_scale=self.laser_scale)
+                                offset_x=self.right_laser_offset[0] * scale_x, offset_y=self.right_laser_offset[1] * scale_y,
+                                offset_z=self.right_laser_offset[2] * scale_z, damage_level=laser_dmg, owner=self, laser_scale=self.laser_scale)
                 pool.get_object(DualLaser, self.position, true_aim_rotation, self.forward, self.right, self.up,
-                                offset_x=self.left_laser_offset[0], offset_y=self.left_laser_offset[1],
-                                offset_z=self.left_laser_offset[2], damage_level=laser_dmg, owner=self, laser_scale=self.laser_scale)
+                                offset_x=self.left_laser_offset[0] * scale_x, offset_y=self.left_laser_offset[1] * scale_y,
+                                offset_z=self.left_laser_offset[2] * scale_z, damage_level=laser_dmg, owner=self, laser_scale=self.laser_scale)
             else:
+                config = AVAILABLE_SHIPS.get(self.ship_id, AVAILABLE_SHIPS["nave1"])
+                scale_x, scale_y, scale_z = config.scale
                 DualLaser(self.position, true_aim_rotation, self.forward, self.right, self.up,
-                          offset_x=self.right_laser_offset[0], offset_y=self.right_laser_offset[1],
-                          offset_z=self.right_laser_offset[2], damage_level=laser_dmg, owner=self, laser_scale=self.laser_scale)
+                          offset_x=self.right_laser_offset[0] * scale_x, offset_y=self.right_laser_offset[1] * scale_y,
+                          offset_z=self.right_laser_offset[2] * scale_z, damage_level=laser_dmg, owner=self, laser_scale=self.laser_scale)
                 DualLaser(self.position, true_aim_rotation, self.forward, self.right, self.up,
-                          offset_x=self.left_laser_offset[0], offset_y=self.left_laser_offset[1],
-                          offset_z=self.left_laser_offset[2], damage_level=laser_dmg, owner=self, laser_scale=self.laser_scale)
+                          offset_x=self.left_laser_offset[0] * scale_x, offset_y=self.left_laser_offset[1] * scale_y,
+                          offset_z=self.left_laser_offset[2] * scale_z, damage_level=laser_dmg, owner=self, laser_scale=self.laser_scale)
 
             self.shake_amount = clamp(self.shake_amount + 0.2, 0, 0.6)
             

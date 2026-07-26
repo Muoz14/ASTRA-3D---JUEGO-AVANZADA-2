@@ -11,7 +11,7 @@
         "maniobra_agil": false,
         "riesgo_borde": true,
         "tiempo_veterano": true,
-        "combate_veterano": false,
+        "combate_veterano": true,
         "supervivencia_preciso": true,
         "exploracion_nomada": true,
         "scanner_rastreador": true,

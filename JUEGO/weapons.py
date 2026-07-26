@@ -63,6 +63,7 @@ class DualLaser(Entity):
             color=color.red,
             unlit=True,
             scale=laser_scale,
+            collider='box',
             **kwargs
         )
         
@@ -75,7 +76,7 @@ class DualLaser(Entity):
         self.position = ship_position + self.center_offset + (ship_forward * offset_z)
         self.rotation = ship_rotation
         self.scale = kwargs.get('laser_scale', (0.2, 0.2, 2.0))
-        self.speed = 280
+        self.speed = 200
         self.lifetime = 2.0
         self.age = 0.0
 
@@ -89,37 +90,45 @@ class DualLaser(Entity):
         # Calculamos cuánto va a avanzar el láser en este exacto frame
         distancia_avance = self.speed * time.dt
         
-        # Guardamos la posición actual como origen del boxcast
-        origen = self.position
+        # Guardamos la posición de la COLA del láser para que el raycast barra todo el láser
+        # Esto evita fallos cuando el asteroide está pegado a la nave (point-blank)
+        cola_laser = self.position - (self.forward * (self.scale_z / 2))
         
         # Movemos el láser visualmente
         self.position += self.forward * distancia_avance
 
-        # Usar un boxcast perforante. Si choca con algo que no es asteroide (como botín), 
-        # lo ignora y vuelve a lanzar el rayo en el mismo frame para no ser bloqueado.
-        virtual_center = origen - getattr(self, 'center_offset', Vec3(0,0,0))
-        remaining_dist = distancia_avance + (self.scale_z / 2)
+        remaining_dist = distancia_avance + self.scale_z
+        
+        # Mantenemos ignorado al dueño y a sí mismo
         ignore_list = [self, getattr(self, 'owner', None)]
         
         hit_asteroid = None
         
-        for _ in range(5): # Máximo 5 perforaciones por frame por seguridad
-            hit_info = boxcast(
-                origin=virtual_center, 
-                direction=self.forward, 
-                distance=remaining_dist, 
-                thickness=(4.0, 4.0), 
-                ignore=ignore_list
-            )
-            
-            if hit_info.hit:
-                if hasattr(hit_info.entity, 'is_asteroid'):
-                    hit_asteroid = hit_info.entity
-                    break
+        # 1. Comprobamos si el volumen físico del láser YA está tocando un asteroide
+        # Esto soluciona cuando se dispara estando metido dentro del asteroide
+        overlap_hit = self.intersects(ignore=ignore_list)
+        if overlap_hit.hit and hasattr(overlap_hit.entity, 'is_asteroid'):
+            hit_asteroid = overlap_hit.entity
+        
+        if not hit_asteroid:
+            # 2. Si no, hacemos el barrido (boxcast) para prevenir tunneling (atravesar rocas por ir rápido)
+            for _ in range(5):
+                hit_info = boxcast(
+                    origin=cola_laser, 
+                    direction=self.forward, 
+                    distance=remaining_dist, 
+                    thickness=(1.5, 1.5), 
+                    ignore=ignore_list
+                )
+                
+                if hit_info.hit:
+                    if hasattr(hit_info.entity, 'is_asteroid'):
+                        hit_asteroid = hit_info.entity
+                        break
+                    else:
+                        ignore_list.append(hit_info.entity)
                 else:
-                    ignore_list.append(hit_info.entity)
-            else:
-                break
+                    break
 
         if hit_asteroid:
             impact_position = hit_asteroid.position
