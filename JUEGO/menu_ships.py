@@ -73,6 +73,92 @@ class ShipSelectionMenu(Entity):
 
     def launch(self):
         ship_id = self.ship_keys[self.current_idx]
-        self.disable()
-        self.main_menu.bg_container.disable() # Hide background
-        self.start_game_func(ship_id)
+        
+        # Deshabilitar botones para evitar clics dobles
+        self.btn_prev.disable()
+        self.btn_next.disable()
+        self.btn_back.disable()
+        self.btn_launch.disable()
+        
+        # Limpiar la pantalla: Desvanecer la UI suavemente
+        self.title.animate_color(color.rgba(255, 255, 255, 0), duration=0.3)
+        self.info_bg.animate_color(color.rgba(0, 0, 0, 0), duration=0.3)
+        self.ship_name.animate_color(color.rgba(0, 255, 255, 0), duration=0.3)
+        self.ship_desc.animate_color(color.rgba(200, 200, 200, 0), duration=0.3)
+        self.btn_prev.animate_color(color.rgba(0, 0, 0, 0), duration=0.3)
+        self.btn_next.animate_color(color.rgba(0, 0, 0, 0), duration=0.3)
+        self.btn_back.animate_color(color.rgba(0, 0, 0, 0), duration=0.3)
+        self.btn_launch.animate_color(color.rgba(0, 0, 0, 0), duration=0.3)
+        
+        self.btn_prev.text_entity.enabled = False
+        self.btn_next.text_entity.enabled = False
+        self.btn_back.text_entity.enabled = False
+        self.btn_launch.text_entity.enabled = False
+
+        from ursina import Cylinder, Vec3, curve, invoke
+        
+        # Crear portal idéntico al de cinematics.py
+        portal_z = 250
+        portal = Entity(parent=scene, model=Cylinder(resolution=6), color=color.rgba(0, 255, 255, 180), double_sided=True)
+        portal.position = (0, 0, portal_z)
+        portal.rotation_x = 90
+        portal.scale = (0, 0.01, 0)
+        
+        portal_inner = Entity(parent=portal, model=Cylinder(resolution=6), color=color.white, double_sided=True)
+        portal_inner.scale = (0.9, 1.1, 0.9)
+        
+        # Abrir el portal (esperamos a que la UI desaparezca)
+        portal.animate_scale(Vec3(35, 0.01, 35), duration=0.8, curve=curve.out_back, delay=0.5)
+        
+        # Entidad temporal para rotar el portal
+        spinner = Entity(parent=scene)
+        def spin_portal():
+            if portal:
+                portal.rotation_y += 140 * time.dt
+                portal_inner.rotation_y -= 280 * time.dt
+        spinner.update = spin_portal
+        
+        # La nave despega y entra al portal
+        if hasattr(self.main_menu, 'menu_ship'):
+            # Centrarla perfectamente y acelerarla
+            invoke(self.main_menu.menu_ship.animate_position, (0, 0, portal_z + 20), duration=1.5, curve=curve.in_expo, delay=1.2)
+            
+        # Fundido a negro (fade to black) total para limpiar antes de ceder control
+        black_screen = Entity(parent=camera.ui, model='quad', color=color.rgba(0,0,0,0), scale=99, z=-99)
+        invoke(black_screen.animate_color, color.black, duration=0.8, delay=2.2)
+        
+        def finish():
+            destroy(portal)
+            destroy(spinner)
+            destroy(black_screen)
+            self.disable()
+            self.main_menu.bg_container.disable() 
+            
+            # Restaurar colores y estados originales para futuras entradas al menú
+            self.title.color = color.white
+            self.info_bg.color = color.hex('#0a0c0f')
+            self.ship_name.color = color.cyan
+            self.ship_desc.color = color.light_gray
+            self.btn_prev.color = color.dark_gray
+            self.btn_next.color = color.dark_gray
+            self.btn_back.color = color.gray
+            self.btn_launch.color = color.azure
+            
+            self.btn_prev.enable()
+            self.btn_next.enable()
+            self.btn_back.enable()
+            self.btn_launch.enable()
+            
+            self.btn_prev.text_entity.enabled = True
+            self.btn_next.text_entity.enabled = True
+            self.btn_back.text_entity.enabled = True
+            self.btn_launch.text_entity.enabled = True
+            if hasattr(self.main_menu, 'menu_ship'):
+                # Restaurar a la posición inicial del MENÚ PRINCIPAL (no de selección)
+                self.main_menu.menu_ship.position = (5.5, -2.5, 12)
+                self.main_menu.menu_ship.rotation = (0, 7, 0)
+            
+            # Arrancar la verdadera cinemática del juego
+            self.start_game_func(ship_id)
+            
+        invoke(finish, delay=3.2)

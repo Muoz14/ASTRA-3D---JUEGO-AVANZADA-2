@@ -34,26 +34,26 @@ AVAILABLE_SHIPS = {
         id="nave1",
         name="El prototipo",
         model='assets/nave1/SpaceShip.obj',
-        scale=(0.5, 0.5, 0.5),            # Escala original de la version antigua
-        menu_scale=(0.24, 0.24, 0.24),    # Pequeña para el menú
+        scale=(1.0, 1.0, 1.0),            # Aumentado para que no se vea tan pequeña en el juego
+        menu_scale=(1.25, 1.25, 1.25),    # Tamaño perfecto para el menú principal
         ship_color=color.white,
         max_speed=70,
         boost_max_speed=180,
         acceleration=1.5,
         friction=0.8,
-        laser_offsets=((-3.5, -0.5, -5.5), (3.5, -0.5, -5.5)),
-        thruster_offsets=[(-0.6, -0.15, 1.1), (0.6, -0.15, 1.1)],
-        thruster_scale=(0.2, 0.2, 0.6),
+        laser_offsets=((-3.50, -0.50, -6.25), (3.50, -0.50, -6.25)),
+        thruster_offsets=[(-0.70, 0.32, -1.05), (0.70, 0.32, -1.05)],
+        thruster_scale=(2.30, 2.36, 1.28),
         description="Nave de exploración estándar. Equilibrada en velocidad y maniobrabilidad. Ideal para misiones largas y recolección de recursos.",
         max_health=100,
-        dummy_config=DummyConfig(scale_normal=(0.5, 0.5, 0.5), scale_large=(1.25, 1.25, 1.25))
+        dummy_config=DummyConfig(scale_normal=(1.0, 1.0, 1.0), scale_large=(2.0, 2.0, 2.0))
     ),
     "nave2": ShipConfig(
         id="nave2",
         name="El Coloso",
         model='assets/nave2/naveHD.glb',  # Usando el modelo original
         scale=(4.0, 4.0, 4.0),            # Mucho más grande a petición del usuario
-        menu_scale=(0.18, 0.18, 0.25),    # Pequeña para el menú
+        menu_scale=(4.5, 4.5, 4.5),       # Tamaño perfecto para el menú principal
         ship_color=color.white,           # Más brillo (sin oscurecer la textura)
         max_speed=70,                     # MISMA STAT QUE NAVE1
         boost_max_speed=180,              # MISMA STAT QUE NAVE1
@@ -66,6 +66,6 @@ AVAILABLE_SHIPS = {
         thruster_scale=(0.05, 0.05, 0.1025),
         max_health=150,                   # AGUANTA MÁS GOLPES
         laser_scale=(0.8, 0.8, 12.0),     # LASERS MUCHO MÁS GRANDES
-        dummy_config=DummyConfig(scale_normal=(0.8, 0.8, 0.8), scale_large=(4.5, 4.5, 4.5))
+        dummy_config=DummyConfig(scale_normal=(1.2, 1.2, 1.2), scale_large=(6.5, 6.5, 6.5))
     )
 }

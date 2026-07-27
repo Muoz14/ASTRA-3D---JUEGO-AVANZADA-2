@@ -492,8 +492,8 @@ class PlayerShip(Entity):
         
         for offset in config.thruster_offsets:
             scaled_offset = (offset[0] * config.scale[0], offset[1] * config.scale[1], offset[2] * config.scale[2])
-            scaled_thruster = (config.thruster_scale[0] * config.scale[0], config.thruster_scale[1] * config.scale[1], config.thruster_scale[2] * config.scale[2])
-            t = Entity(parent=self, model='sphere', color=color.cyan, scale=scaled_thruster, position=scaled_offset)
+            # Forzamos la escala a (0.2, 0.2, 0.4) para evitar que aparezcan gigantes por un segundo
+            t = Entity(parent=self, model='sphere', color=color.cyan, scale=(0.2, 0.2, 0.4), position=scaled_offset)
             self.thrusters.append(t)
 
 
@@ -507,34 +507,45 @@ class PlayerShip(Entity):
         self.trail_timer -= time.dt
         if self.trail_timer <= 0:
             config = AVAILABLE_SHIPS.get(self.ship_id, AVAILABLE_SHIPS["nave1"])
-            for offset in config.thruster_offsets:
-                for _ in range(2):
-                    direccion_expulsion = 1 if offset[0] > 0 else -1
-                    trail_pos = self.position + (self.right * offset[0] * config.scale[0]) + (self.up * offset[1] * config.scale[1]) + (self.forward * offset[2] * config.scale[2])
-                    pool = getattr(self.game_app, 'pool', None) if hasattr(self, 'game_app') else None
-                    if pool:
-                        p = pool.get_object(Entity, pool_key="TrailParticle", model='sphere', color=color.rgba(0, 255, 255, 50), position=trail_pos)
-                        p.position = trail_pos
-                        p.scale = random.uniform(0.06, 0.14)
-                        p.color = color.rgba(0, 255, 255, 50)
-                    else:
-                        p = Entity(model='sphere', color=color.rgba(0, 255, 255, 50), scale=random.uniform(0.06, 0.14), position=trail_pos)
-                    
-                    duracion_vida = random.uniform(0.12, 0.22)
-                    
-                    if hasattr(p, 'animations'):
-                        for anim in p.animations: anim.finish()
-                        p.animations.clear()
+            
+            if self.ship_id == "nave2":
+                for offset in config.thruster_offsets:
+                    scaled_offset = (offset[0] * config.scale[0], offset[1] * config.scale[1], offset[2] * config.scale[2])
+                    p = Entity(parent=self, model='sphere', color=color.rgba(255, 200, 200, 200), unlit=True,
+                               scale=random.uniform(0.06, 0.12) * config.scale[0], position=scaled_offset)
+                    # Dispersión masiva hacia atrás
+                    p.animate_position(p.position + (random.uniform(-0.15, 0.15) * config.scale[0], random.uniform(-0.15, 0.15) * config.scale[1], -2.0 * config.scale[2]), duration=0.4, curve=curve.linear)
+                    p.animate_scale(0, duration=0.4, curve=curve.linear)
+                    destroy(p, delay=0.4)
+            else:
+                for offset in config.thruster_offsets:
+                    for _ in range(2):
+                        direccion_expulsion = 1 if offset[0] > 0 else -1
+                        trail_pos = self.position + (self.right * offset[0] * config.scale[0]) + (self.up * offset[1] * config.scale[1]) + (self.forward * offset[2] * config.scale[2])
+                        pool = getattr(self.game_app, 'pool', None) if hasattr(self, 'game_app') else None
+                        if pool:
+                            p = pool.get_object(Entity, pool_key="TrailParticle", model='sphere', color=color.rgba(0, 255, 255, 50), position=trail_pos)
+                            p.position = trail_pos
+                            p.scale = random.uniform(0.06, 0.14)
+                            p.color = color.rgba(0, 255, 255, 50)
+                        else:
+                            p = Entity(model='sphere', color=color.rgba(0, 255, 255, 50), scale=random.uniform(0.06, 0.14), position=trail_pos)
                         
-                    p.animate_scale(Vec3(0, 0, 0), duration=duracion_vida, curve=curve.linear)
-                    p.animate_color(color.rgba(0, 255, 255, 0), duration=duracion_vida, curve=curve.linear)
-                    pos_final = p.position + (self.right * direccion_expulsion * random.uniform(1.2, 2.5)) + (self.forward * -1.5)
-                    p.animate_position(pos_final, duration=duracion_vida, curve=curve.out_sine)
-                    
-                    if pool:
-                        invoke(pool.return_object, p, delay=duracion_vida + 0.05)
-                    else:
-                        destroy(p, delay=duracion_vida + 0.05)
+                        duracion_vida = random.uniform(0.12, 0.22)
+                        
+                        if hasattr(p, 'animations'):
+                            for anim in p.animations: anim.finish()
+                            p.animations.clear()
+                            
+                        p.animate_scale(Vec3(0, 0, 0), duration=duracion_vida, curve=curve.linear)
+                        p.animate_color(color.rgba(0, 255, 255, 0), duration=duracion_vida, curve=curve.linear)
+                        pos_final = p.position + (self.right * direccion_expulsion * random.uniform(1.2, 2.5)) + (self.forward * -1.5)
+                        p.animate_position(pos_final, duration=duracion_vida, curve=curve.out_sine)
+                        
+                        if pool:
+                            invoke(pool.return_object, p, delay=duracion_vida + 0.05)
+                        else:
+                            destroy(p, delay=duracion_vida + 0.05)
             self.trail_timer = 0.08  # OPTIMIZACIÓN: Bajamos DRASTICAMENTE la frecuencia de partículas
 
     def start_dash(self, direction):
@@ -611,6 +622,7 @@ class PlayerShip(Entity):
         self.target_speed = 0
         self.session_score = 0.0
         self.session_time = 0.0
+        self.session_distance = 0.0
         self.boost_fuel = 100
         self.shield = 100
         self.heat = 0

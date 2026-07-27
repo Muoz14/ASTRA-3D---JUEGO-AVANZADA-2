@@ -30,11 +30,9 @@ class IntroCinematic(Entity):
 
         # 2. ACTOR DOBLE (DUMMY)
         # Lo configuraremos en play() en base al ship_id del player
-        self.dummy_ship = Entity(model=None, enabled=False)
-        self.dummy_ship_model = Entity(parent=self.dummy_ship, model='cube')
+        from menu import MenuDummyShip
+        self.dummy_ship = MenuDummyShip(enabled=False)
         
-        self.dummy_thrusters = []
-
         # 3. PORTAL HEXAGONAL
         self.portal = Entity(model=Cylinder(resolution=6), color=color.rgba(0, 255, 255, 180), scale=(0, 0.01, 0),
                              rotation_x=90, unlit=True, enabled=False)
@@ -58,18 +56,7 @@ class IntroCinematic(Entity):
         # Configurar el Dummy en base al Player
         config = AVAILABLE_SHIPS.get(self.player.ship_id, AVAILABLE_SHIPS["nave1"])
         self.current_config = config
-        self.dummy_ship_model.model = config.model
-        self.dummy_ship_model.color = config.ship_color
-        self.dummy_ship_model.scale = config.dummy_config.scale_normal
-        self.dummy_ship_model.rotation = getattr(config, 'model_rotation_offset', (0,0,0))
-        
-        for t in self.dummy_thrusters:
-            destroy(t)
-        self.dummy_thrusters.clear()
-        
-        for offset in config.thruster_offsets:
-            t = Entity(parent=self.dummy_ship_model, model='sphere', color=color.cyan, scale=config.thruster_scale, position=offset)
-            self.dummy_thrusters.append(t)
+        self.dummy_ship.set_config(config)
             
         self.dummy_ship.enabled = True
         self.portal.enabled = True
@@ -91,7 +78,7 @@ class IntroCinematic(Entity):
         self.portal.animate_scale(Vec3(35, 0.01, 35), duration=0.8, curve=curve.out_back)
 
         self.dummy_ship.enabled = True
-        self.dummy_ship_model.scale = self.current_config.dummy_config.scale_large
+        self.dummy_ship.scale = self.current_config.dummy_config.scale_large
         self.dummy_ship.position = (0, 0, -260)
         self.dummy_ship.rotation = (0, 0, 0)
 
@@ -111,28 +98,32 @@ class IntroCinematic(Entity):
         # La nave arranca un poco más atrás
         self.dummy_ship.position = (0, 0, -160)
 
-        # Nos colocamos detrás y a la derecha de la nave
-        self.base_cam_pos = Vec3(6, 1.5, -175)
+        # Nos colocamos detrás y a la derecha de la nave.
+        # Al hacer a la cámara hija de la nave, evitamos cualquier jitter/lag por el orden de actualización del motor.
+        camera.parent = self.dummy_ship
+        # La posición relativa de (6, 1.5, -175) respecto a (0, 0, -160) es (6, 1.5, -15)
+        self.base_cam_pos = Vec3(6, 1.5, -15)
         camera.position = self.base_cam_pos
 
         # Miramos hacia la nave, pero le metemos una inclinación de -15 grados (Dutch Angle)
-        camera.look_at(self.dummy_ship.position)
+        camera.look_at(self.dummy_ship)
         camera.rotation_z = -15
         camera.fov = 65
 
         self.subtitle.text = "[SISTEMA]: Estabilizando campos de inercia espacial..."
 
-        # La cámara y la nave viajan juntas una gran distancia
+        # Solo animamos la nave, la cámara viajará con ella perfectamente estática en su posición relativa.
         self.dummy_ship.animate_position((0, 0, -40), duration=3.0, curve=curve.linear)
-        camera.animate_position((6, 1.5, -55), duration=3.0, curve=curve.linear)
 
     def execute_shot_3(self, sid):
         if sid != self.session_id or not self.is_playing: return
 
-        self.dummy_ship_model.scale = self.current_config.dummy_config.scale_normal
+        self.dummy_ship.scale = self.current_config.dummy_config.scale_normal
         self.dummy_ship.position = (0, 0, -115)
         self.dummy_ship.rotation = (0, 0, 0)
 
+        # Desvinculamos la cámara de la nave
+        camera.parent = scene
         self.base_cam_pos = Vec3(18, 4, -40)
         camera.position = self.base_cam_pos
         camera.rotation = (10, -60, 0)
@@ -278,26 +269,9 @@ class IntroCinematic(Entity):
             self.portal_inner.rotation_y -= 280 * time.dt
 
         if self.dummy_ship.enabled:
-            for t in self.dummy_thrusters:
-                t.scale_z = random.uniform(3.5, 5.0)
-
             if random.random() < 0.6:
                 from player import SpeedLine
                 SpeedLine()
-
-            if random.random() < 0.4:
-                config = getattr(self, 'current_config', AVAILABLE_SHIPS["nave1"])
-                scale_x, scale_y, scale_z = self.dummy_ship_model.scale
-                for offset in config.thruster_offsets:
-                    p_pos = (self.dummy_ship.position +
-                             (self.dummy_ship.right * offset[0] * scale_x) +
-                             (self.dummy_ship.up * offset[1] * scale_y) +
-                             (self.dummy_ship.forward * offset[2] * scale_z))
-
-                    p = Entity(model='sphere', color=color.rgba(0, 255, 255, 120), scale=random.uniform(0.08, 0.25),
-                               position=p_pos)
-                    p.animate_scale((0, 0, 0), duration=0.25)
-                    destroy(p, delay=0.3)
 
         if self.camera_shake > 0:
             self.camera_shake -= time.dt * 6.0

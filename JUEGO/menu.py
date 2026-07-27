@@ -115,26 +115,32 @@ class MenuTurboEffect:
 class MenuTurboNave1(MenuTurboEffect):
     """Efectos de turbo ágiles y rápidos para la Nave 1."""
     def spawn(self, ship):
-        from ursina import Entity, color, random, curve, destroy
+        from ursina import Entity, color, random, curve, destroy, scene
         for offset in ship.config.thruster_offsets:
             # Cositos blancos/celestes simulando alta velocidad
             p = Entity(parent=ship.bob_container, model='sphere', color=color.rgba(255, 255, 255, 150), unlit=True,
                        scale=random.uniform(0.03, 0.06), position=offset)
-            # Se alejan muy rápido hacia atrás
-            p.animate_position(p.position + (random.uniform(-0.05, 0.05), random.uniform(-0.05, 0.05), -2.5), duration=0.3, curve=curve.linear)
+            
+            p.world_parent = scene # Desvincular de la nave para que se queden en el mundo
+            
+            # Se alejan muy rápido hacia atrás (usando la orientación de la nave)
+            p.animate_position(p.position + (ship.right * random.uniform(-0.05, 0.05)) + (ship.up * random.uniform(-0.05, 0.05)) + (ship.forward * -2.5), duration=0.3, curve=curve.linear)
             p.animate_scale(0, duration=0.3, curve=curve.linear)
             destroy(p, delay=0.3)
 
 class MenuTurboNave2(MenuTurboEffect):
     """Efectos de turbo masivos y pesados para el Coloso (Nave 2)."""
     def spawn(self, ship):
-        from ursina import Entity, color, random, curve, destroy
+        from ursina import Entity, color, random, curve, destroy, scene
         for offset in ship.config.thruster_offsets:
             # Cositos blancos/naranjas más grandes simulando potencia bruta
             p = Entity(parent=ship.bob_container, model='sphere', color=color.rgba(255, 200, 200, 200), unlit=True,
                        scale=random.uniform(0.06, 0.12), position=offset)
+            
+            p.world_parent = scene # Desvincular de la nave para que se queden en el mundo
+            
             # Se dispersan un poco más debido a la potencia del Coloso
-            p.animate_position(p.position + (random.uniform(-0.15, 0.15), random.uniform(-0.15, 0.15), -2.0), duration=0.4, curve=curve.linear)
+            p.animate_position(p.position + (ship.right * random.uniform(-0.15, 0.15)) + (ship.up * random.uniform(-0.15, 0.15)) + (ship.forward * -2.0), duration=0.4, curve=curve.linear)
             p.animate_scale(0, duration=0.4, curve=curve.linear)
             destroy(p, delay=0.4)
 
@@ -163,12 +169,12 @@ class MenuDummyShip(Entity):
         else:
             self.turbo_effect = MenuTurboNave2()
         
-        # Usamos la escala grande del dummy_config si existe, de lo contrario un multiplicador
-        if hasattr(config, 'dummy_config') and config.dummy_config:
-            self.scale = config.dummy_config.scale_large
+        # La nave del menú debe usar por defecto el menu_scale.
+        # Las cinemáticas sobrescriben esto con scale_large o scale_normal cuando es necesario.
+        if hasattr(config, 'menu_scale'):
+            self.scale = config.menu_scale
         else:
-            multiplier = 1.5
-            self.scale = (config.scale[0] * multiplier, config.scale[1] * multiplier, config.scale[2] * multiplier)
+            self.scale = config.scale
         
         for t in self.thruster_glows:
             destroy(t)
@@ -178,10 +184,16 @@ class MenuDummyShip(Entity):
         for offset in config.thruster_offsets:
             local_offset = offset
             
+            # Limitar el tamaño máximo de los glows para evitar que ocupen toda la pantalla
+            # Si el config define un scale gigantesco, lo capamos a un valor estético razonable.
+            base_x = min(config.thruster_scale[0], 0.15)
+            base_y = min(config.thruster_scale[1], 0.15)
+            base_z = min(config.thruster_scale[2], 0.45)
+            
             local_scale = (
-                config.thruster_scale[0] * 1.5,
-                config.thruster_scale[1] * 1.5,
-                config.thruster_scale[2] * 2.0
+                base_x * 1.5,
+                base_y * 1.5,
+                base_z * 2.0
             )
             
             glow = Entity(parent=self.bob_container, model='sphere', color=color.rgba(0, 255, 255, 200), unlit=True, scale=local_scale, position=local_offset)

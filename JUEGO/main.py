@@ -408,7 +408,7 @@ class GameApp:
         self.player.reset_ship()
         
         # Iniciar Misiones
-        self.mission_manager.missions.clear()
+        self.mission_manager.reset()
         self.mission_manager.add_mission(
             id="main_01",
             title="Investiga la Anomalía",
@@ -494,6 +494,10 @@ class GameApp:
             # Asegurar que la nave vuelva a su posición original a la derecha
             self.main_menu.menu_ship.position = (5.5, -2.5, 12)
             self.main_menu.menu_ship.rotation = (0, 7, 0)
+            
+            # Forzar la posición de nuevo en el siguiente frame para evitar bugs del motor con secuencias interrumpidas
+            invoke(setattr, self.main_menu.menu_ship, 'position', (5.5, -2.5, 12), delay=0.05)
+            invoke(setattr, self.main_menu.menu_ship, 'rotation', (0, 7, 0), delay=0.05)
             
         if hasattr(self.main_menu, 'ship_menu'):
             self.main_menu.ship_menu.disable()

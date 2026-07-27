@@ -183,6 +183,11 @@ class MissionManager(Entity):
         self.ui.disable() # Comienza desactivado (por ej en menú)
         self.waypoint.disable()
 
+    def reset(self):
+        self.missions.clear()
+        self.tracked_mission_id = None
+        self.ui.update_ui()
+
     def add_mission(self, id, title, description, short_description=None, target_pos=None, is_main=True, max_progress=0):
         m = Mission(id, title, description, short_description, target_pos, is_main, max_progress)
         self.missions.append(m)
