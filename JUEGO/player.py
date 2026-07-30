@@ -236,6 +236,21 @@ class PlayerShip(Entity):
         self.achievements = None
         self.scanner_warning = None
         
+        # Target lock system
+        self.locked_target = None
+        self.lock_marker = __import__('ursina').Entity(parent=__import__('ursina').camera.ui, model='quad', texture='circle', color=__import__('ursina').color.red, scale=0.05, enabled=False)
+        self.lock_marker.texture = None # Will draw it with quads just like scanner
+        
+        # Build 3D marker for lock
+        self.lock_3d = __import__('ursina').Entity(billboard=True, enabled=False)
+        c = __import__('ursina').color.rgb(255, 80, 80)
+        __import__('ursina').Entity(parent=self.lock_3d, model='quad', scale=(5.0, 0.2), position=(0, 2.5, 0), color=c, unlit=True)
+        __import__('ursina').Entity(parent=self.lock_3d, model='quad', scale=(5.0, 0.2), position=(0, -2.5, 0), color=c, unlit=True)
+        __import__('ursina').Entity(parent=self.lock_3d, model='quad', scale=(0.2, 5.0), position=(2.5, 0, 0), color=c, unlit=True)
+        __import__('ursina').Entity(parent=self.lock_3d, model='quad', scale=(0.2, 5.0), position=(-2.5, 0, 0), color=c, unlit=True)
+        self.lock_text = __import__('ursina').Text(parent=self.lock_3d, text='...', scale=20, y=4.5, billboard=True, origin=(0,0), color=c)
+
+        
         # DEBUG: Mostrar posición para configurar misiones
         self.pos_debug = Text(parent=camera.ui, text="", position=(window.top_left.x + 0.05, window.top_left.y - 0.1), scale=1.5, color=color.yellow, enabled=False)
         self.mission_prompt = Text(parent=camera.ui, text="Presiona [X] para analizar el planeta", position=(0, -0.25), origin=(0,0), scale=1.5, color=color.yellow, enabled=False)
@@ -426,6 +441,8 @@ class PlayerShip(Entity):
         self.right_laser_offset = config.laser_offsets[1]
         self.left_laser_offset = config.laser_offsets[0]
         self.laser_scale = getattr(config, 'laser_scale', (0.2, 0.2, 2.0))
+        self.laser_color = getattr(config, 'laser_color', color.red)
+        self.thruster_color = getattr(config, 'thruster_color', color.rgba(0, 255, 255, 200))
         self.laser_level = 1
         self.vacuum_level = 0
 
@@ -476,7 +493,7 @@ class PlayerShip(Entity):
         self.blackhole_cooldown = 5.0
         self.blackhole_timer = 0.0
 
-        self.sector_radius = 2500
+        self.sector_radius = 15000
         self.oob_timer = 10.0
         
         # OPTIMIZACIÓN: Pre-calculamos los colores de los motores
@@ -485,6 +502,9 @@ class PlayerShip(Entity):
         self.color_s = color.blue
         self.color_idle = color.rgba(0, 180, 255, 120)
         
+        # Guardar la escala configurada
+        self.base_thruster_scale = getattr(config, 'thruster_scale', (0.2, 0.2, 0.4))
+        
         # Reposition thrusters
         for t in self.thrusters:
             destroy(t)
@@ -492,8 +512,7 @@ class PlayerShip(Entity):
         
         for offset in config.thruster_offsets:
             scaled_offset = (offset[0] * config.scale[0], offset[1] * config.scale[1], offset[2] * config.scale[2])
-            # Forzamos la escala a (0.2, 0.2, 0.4) para evitar que aparezcan gigantes por un segundo
-            t = Entity(parent=self, model='sphere', color=color.cyan, scale=(0.2, 0.2, 0.4), position=scaled_offset)
+            t = Entity(parent=self, model='sphere', color=self.thruster_color, scale=self.base_thruster_scale, position=scaled_offset)
             self.thrusters.append(t)
 
 
@@ -508,10 +527,14 @@ class PlayerShip(Entity):
         if self.trail_timer <= 0:
             config = AVAILABLE_SHIPS.get(self.ship_id, AVAILABLE_SHIPS["nave1"])
             
-            if self.ship_id == "nave2":
+            # Ajustamos la opacidad del color para la estela (50 de alfa aprox)
+            base_color = self.thruster_color
+            trail_color = color.rgba(base_color.r * 255, base_color.g * 255, base_color.b * 255, 50)
+            
+            if self.ship_id in ["nave2", "nave-altech-enemy"]:
                 for offset in config.thruster_offsets:
                     scaled_offset = (offset[0] * config.scale[0], offset[1] * config.scale[1], offset[2] * config.scale[2])
-                    p = Entity(parent=self, model='sphere', color=color.rgba(255, 200, 200, 200), unlit=True,
+                    p = Entity(parent=self, model='sphere', color=trail_color, unlit=True,
                                scale=random.uniform(0.06, 0.12) * config.scale[0], position=scaled_offset)
                     # Dispersión masiva hacia atrás
                     p.animate_position(p.position + (random.uniform(-0.15, 0.15) * config.scale[0], random.uniform(-0.15, 0.15) * config.scale[1], -2.0 * config.scale[2]), duration=0.4, curve=curve.linear)
@@ -524,12 +547,12 @@ class PlayerShip(Entity):
                         trail_pos = self.position + (self.right * offset[0] * config.scale[0]) + (self.up * offset[1] * config.scale[1]) + (self.forward * offset[2] * config.scale[2])
                         pool = getattr(self.game_app, 'pool', None) if hasattr(self, 'game_app') else None
                         if pool:
-                            p = pool.get_object(Entity, pool_key="TrailParticle", model='sphere', color=color.rgba(0, 255, 255, 50), position=trail_pos)
+                            p = pool.get_object(Entity, pool_key="TrailParticle", model='sphere', color=trail_color, position=trail_pos)
                             p.position = trail_pos
                             p.scale = random.uniform(0.06, 0.14)
-                            p.color = color.rgba(0, 255, 255, 50)
+                            p.color = trail_color
                         else:
-                            p = Entity(model='sphere', color=color.rgba(0, 255, 255, 50), scale=random.uniform(0.06, 0.14), position=trail_pos)
+                            p = Entity(model='sphere', color=trail_color, scale=random.uniform(0.06, 0.14), position=trail_pos)
                         
                         duracion_vida = random.uniform(0.12, 0.22)
                         
@@ -601,6 +624,11 @@ class PlayerShip(Entity):
         self.camera_pivot.position = Vec3(0, 0, 0)
         self.scanner.clear_markers()
         self.scanner.active = False
+        
+        
+        __import__('ursina').Entity(parent=self.lock_3d, model='quad', scale=(3.0, 0.1), position=(0, -1.5, 0), color=c, unlit=True)
+        __import__('ursina').Entity(parent=self.lock_3d, model='quad', scale=(0.1, 3.0), position=(1.5, 0, 0), color=c, unlit=True)
+        __import__('ursina').Entity(parent=self.lock_3d, model='quad', scale=(0.1, 3.0), position=(-1.5, 0, 0), color=c, unlit=True)
 
         if getattr(self.tactical_map, 'is_open', False):
             self.tactical_map.toggle()
@@ -673,6 +701,41 @@ class PlayerShip(Entity):
 
     def update(self):
         # Actualizar texto de depuración de posición optimizado
+        # Target Lock System
+        if held_keys['right mouse'] and not self.is_dead and not self.is_cinematic:
+            if not self.locked_target:
+                closest_enemy = None
+                closest_dist = float('inf')
+                for e in __import__('ursina').scene.entities:
+                    if type(e).__name__ == 'EnemyShip' and getattr(e, 'faction', 'unknown') != 'npc' and not getattr(e, 'is_dead', False):
+                        if (e.position - self.position).length() < 2000:
+                            
+                            dir_to_enemy = (e.position - self.position).normalized()
+                            dot_prod = self.forward.dot(dir_to_enemy)
+                            if dot_prod > 0.95:  # ~18 degrees from center
+                                d = 1.0 - dot_prod
+                                if d < closest_dist:
+                                    closest_dist = d
+                                    closest_enemy = e
+                if closest_enemy:
+                    self.locked_target = closest_enemy
+                    self.lock_3d.enabled = True
+            
+            if self.locked_target:
+                if getattr(self.locked_target, 'is_dead', False) or (self.locked_target.position - self.position).length() > 2000:
+                    self.locked_target = None
+                    self.lock_3d.enabled = False
+                else:
+                    self.lock_3d.position = self.locked_target.position
+                    dist = int((self.locked_target.position - self.position).length())
+                    hp = getattr(self.locked_target, 'health', 0)
+                    self.lock_text.text = f'HP: {hp}\\nDIST: {dist}m'
+
+        else:
+            self.locked_target = None
+            if hasattr(self, 'lock_3d'):
+                self.lock_3d.enabled = False
+
         new_pos_txt = f"POS: {int(self.x)}, {int(self.y)}, {int(self.z)}"
         if self.pos_debug.text != new_pos_txt:
             self.pos_debug.text = new_pos_txt
@@ -916,11 +979,11 @@ class PlayerShip(Entity):
                 t.color = t_color
 
             if is_boosting or held_keys['w']:
-                t.scale_x = lerp(t.scale_x, random.uniform(0.18, 0.24), time.dt * 20)
-                t.scale_y = t.scale_x
+                t.scale_x = lerp(t.scale_x, self.base_thruster_scale[0] * 1.2, time.dt * 20)
+                t.scale_y = lerp(t.scale_y, self.base_thruster_scale[1] * 1.2, time.dt * 20)
             else:
-                t.scale_x = lerp(t.scale_x, 0.2, time.dt * 10)
-                t.scale_y = 0.2
+                t.scale_x = lerp(t.scale_x, self.base_thruster_scale[0], time.dt * 10)
+                t.scale_y = lerp(t.scale_y, self.base_thruster_scale[1], time.dt * 10)
 
         if self.dash_timer > 0: self.dash_timer -= time.dt
 
@@ -953,7 +1016,7 @@ class PlayerShip(Entity):
             self.tacho_needle.color = new_tacho_c
             self.speedometer.color = color.orange if speed_ratio > 0.8 else color.white
 
-        if held_keys['right mouse']:
+        if held_keys['middle mouse']:
             self.camera_pivot.rotation_y += mouse.velocity[0] * self.mouse_sensitivity
             self.camera_pivot.rotation_x -= mouse.velocity[1] * self.mouse_sensitivity
             self.camera_pivot.rotation_y = clamp(self.camera_pivot.rotation_y, -90, 90)
@@ -1006,13 +1069,13 @@ class PlayerShip(Entity):
                 base_z_target = self.rotation_z
             else:
                 target_z = round(self.rotation_z / 360) * 360
-                if not held_keys['right mouse']:
+                if not held_keys['middle mouse']:
                     target_banking = clamp(mouse.velocity[0] * 350, -self.max_banking_angle, self.max_banking_angle)
                     target_z += target_banking
 
                 if self.auto_level_timer > 0:
                     self.auto_level_timer -= time.dt
-                    if not held_keys['right mouse'] and abs(mouse.velocity[0]) > 0.005:
+                    if not held_keys['middle mouse'] and abs(mouse.velocity[0]) > 0.005:
                         self.rotation_z = lerp(self.rotation_z, target_z, time.dt * 6)
                 else:
                     self.rotation_z = lerp(self.rotation_z, target_z, time.dt * self.level_damping)
@@ -1086,19 +1149,23 @@ class PlayerShip(Entity):
                 scale_x, scale_y, scale_z = config.scale
                 pool.get_object(DualLaser, self.position, true_aim_rotation, self.forward, self.right, self.up,
                                 offset_x=self.right_laser_offset[0] * scale_x, offset_y=self.right_laser_offset[1] * scale_y,
-                                offset_z=self.right_laser_offset[2] * scale_z, damage_level=laser_dmg, owner=self, laser_scale=self.laser_scale)
+                                offset_z=self.right_laser_offset[2] * scale_z, damage_level=laser_dmg, owner=self,
+                                laser_scale=self.laser_scale, target=getattr(self, 'locked_target', None))
                 pool.get_object(DualLaser, self.position, true_aim_rotation, self.forward, self.right, self.up,
                                 offset_x=self.left_laser_offset[0] * scale_x, offset_y=self.left_laser_offset[1] * scale_y,
-                                offset_z=self.left_laser_offset[2] * scale_z, damage_level=laser_dmg, owner=self, laser_scale=self.laser_scale)
+                                offset_z=self.left_laser_offset[2] * scale_z, damage_level=laser_dmg, owner=self,
+                                laser_scale=self.laser_scale, target=getattr(self, 'locked_target', None))
             else:
                 config = AVAILABLE_SHIPS.get(self.ship_id, AVAILABLE_SHIPS["nave1"])
                 scale_x, scale_y, scale_z = config.scale
                 DualLaser(self.position, true_aim_rotation, self.forward, self.right, self.up,
                           offset_x=self.right_laser_offset[0] * scale_x, offset_y=self.right_laser_offset[1] * scale_y,
-                          offset_z=self.right_laser_offset[2] * scale_z, damage_level=laser_dmg, owner=self, laser_scale=self.laser_scale)
+                          offset_z=self.right_laser_offset[2] * scale_z, damage_level=laser_dmg, owner=self,
+                          laser_scale=self.laser_scale, target=getattr(self, 'locked_target', None))
                 DualLaser(self.position, true_aim_rotation, self.forward, self.right, self.up,
                           offset_x=self.left_laser_offset[0] * scale_x, offset_y=self.left_laser_offset[1] * scale_y,
-                          offset_z=self.left_laser_offset[2] * scale_z, damage_level=laser_dmg, owner=self, laser_scale=self.laser_scale)
+                          offset_z=self.left_laser_offset[2] * scale_z, damage_level=laser_dmg, owner=self,
+                          laser_scale=self.laser_scale, target=getattr(self, 'locked_target', None))
 
             self.shake_amount = clamp(self.shake_amount + 0.2, 0, 0.6)
             

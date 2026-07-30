@@ -57,21 +57,25 @@ class DualLaser(Entity):
         offset_z = kwargs.pop('offset_z', 0)
         damage_level = kwargs.pop('damage_level', 1)
         laser_scale = kwargs.pop('laser_scale', (0.2, 0.2, 2.0))
+        laser_color = kwargs.pop('laser_color', color.red)
+        self.target = kwargs.pop('target', None)
         
         super().__init__(
             model='cube',
-            color=color.red,
+            color=laser_color,
             unlit=True,
             scale=laser_scale,
             collider='box',
             **kwargs
         )
         
-        self.reset(*args, offset_x=offset_x, offset_y=offset_y, offset_z=offset_z, damage_level=damage_level, owner=self.owner, laser_scale=laser_scale)
+        self.reset(*args, offset_x=offset_x, offset_y=offset_y, offset_z=offset_z, damage_level=damage_level, owner=self.owner, laser_scale=laser_scale, laser_color=laser_color)
 
     def reset(self, ship_position, ship_rotation, ship_forward, ship_right, ship_up, offset_x=0, offset_y=0, offset_z=0, damage_level=1, owner=None, **kwargs):
         self.owner = owner
         self.damage_level = damage_level
+        self.target = kwargs.get('target', None)
+        self.color = kwargs.get('laser_color', color.red)
         self.center_offset = (ship_right * offset_x) + (ship_up * offset_y)
         self.position = ship_position + self.center_offset + (ship_forward * offset_z)
         self.rotation = ship_rotation
@@ -80,59 +84,91 @@ class DualLaser(Entity):
         self.lifetime = 2.0
         self.age = 0.0
 
+    def on_destroy(self):
+        if hasattr(self, 'dummy') and self.dummy:
+            destroy(self.dummy)
+
+    def _cleanup(self):
+        if hasattr(self, 'dummy') and self.dummy:
+            destroy(self.dummy)
+            self.dummy = None
+        if hasattr(self, 'pool'): 
+            self.pool.return_object(self)
+        else: 
+            destroy(self)
+
     def update(self):
-        self.age += time.dt
-        if self.age > self.lifetime:
-            if hasattr(self, 'pool'): self.pool.return_object(self)
-            else: destroy(self)
+        if getattr(self, 'is_empty', lambda: True)(): 
             return
 
-        # Calculamos cuánto va a avanzar el láser en este exacto frame
-        distancia_avance = self.speed * time.dt
-        
-        # Guardamos la posición de la COLA del láser para que el raycast barra todo el láser
-        # Esto evita fallos cuando el asteroide está pegado a la nave (point-blank)
-        cola_laser = self.position - (self.forward * (self.scale_z / 2))
-        
-        # Movemos el láser visualmente
-        self.position += self.forward * distancia_avance
+        self.age += time.dt
+        if self.age > self.lifetime:
+            self._cleanup()
+            return
 
+        # Homing logic
+        if getattr(self, 'target', None):
+            try:
+                # Validar existencia real en C++ para no generar Assertions
+                if getattr(self.target, 'is_dead', False) or getattr(self.target, 'is_empty', lambda: True)():
+                    self.target = None
+                else:
+                    dist_target = (self.target.position - self.position).length()
+                    if dist_target > 0.01:
+                        dir_to_target = (self.target.position - self.position).normalized()
+                        if self.forward.dot(dir_to_target) > -0.2:
+                            if not hasattr(self, 'dummy') or not self.dummy:
+                                self.dummy = Entity(enabled=False)
+                            self.dummy.position = self.position
+                            self.dummy.rotation = self.rotation
+                            self.dummy.look_at(self.target.position)
+                            
+                            def clerp(a, b, t):
+                                return a + ((b - a + 180) % 360 - 180) * t
+                                
+                            self.rotation_x = clerp(self.rotation_x, self.dummy.rotation_x, time.dt * 3.5)
+                            self.rotation_y = clerp(self.rotation_y, self.dummy.rotation_y, time.dt * 3.5)
+                            self.rotation_z = clerp(self.rotation_z, self.dummy.rotation_z, time.dt * 3.5)
+                        else:
+                            self.target = None
+                    else:
+                        self.target = None
+            except:
+                self.target = None
+
+        distancia_avance = self.speed * time.dt
+        cola_laser = self.position - (self.forward * (self.scale_z / 2))
+        self.position += self.forward * distancia_avance
         remaining_dist = distancia_avance + self.scale_z
-        
-        # Mantenemos ignorado al dueño y a sí mismo
         ignore_list = [self, getattr(self, 'owner', None)]
         
-        hit_asteroid = None
-        
-        # 1. Comprobamos si el volumen físico del láser YA está tocando un asteroide
-        # Esto soluciona cuando se dispara estando metido dentro del asteroide
-        overlap_hit = self.intersects(ignore=ignore_list)
-        if overlap_hit.hit and hasattr(overlap_hit.entity, 'is_asteroid'):
-            hit_asteroid = overlap_hit.entity
-        
-        if not hit_asteroid:
-            # 2. Si no, hacemos el barrido (boxcast) para prevenir tunneling (atravesar rocas por ir rápido)
-            for _ in range(5):
-                hit_info = boxcast(
-                    origin=cola_laser, 
-                    direction=self.forward, 
-                    distance=remaining_dist, 
-                    thickness=(1.5, 1.5), 
-                    ignore=ignore_list
-                )
-                
-                if hit_info.hit:
-                    if hasattr(hit_info.entity, 'is_asteroid'):
-                        hit_asteroid = hit_info.entity
-                        break
-                    else:
+        hit_entity = None
+        while True:
+            hit_info = __import__('ursina').raycast(
+                cola_laser,
+                self.forward,
+                distance=distancia_avance,
+                ignore=ignore_list
+            )
+            
+            if hit_info.hit:
+                if (hasattr(hit_info.entity, 'take_damage') or hasattr(hit_info.entity, 'is_asteroid')) and hit_info.entity != getattr(self, 'owner', None):
+                    # Prevent enemy lasers from damaging the player
+                    is_enemy_owner = type(getattr(self, 'owner', None)).__name__ == 'EnemyShip'
+                    is_player_target = type(hit_info.entity).__name__ == 'PlayerShip'
+                    if is_enemy_owner and is_player_target:
                         ignore_list.append(hit_info.entity)
+                    else:
+                        hit_entity = hit_info.entity
+                        break
                 else:
-                    break
+                    ignore_list.append(hit_info.entity)
+            else:
+                break
 
-        if hit_asteroid:
-            impact_position = hit_asteroid.position
-
+        if hit_entity:
+            impact_position = hit_info.world_point if hit_info.hit else hit_entity.position
+            
             from weapons import ExplosionParticle
             for _ in range(random.randint(15, 25)):
                 if hasattr(self, 'pool'):
@@ -140,16 +176,17 @@ class DualLaser(Entity):
                 else:
                     ExplosionParticle(pos=impact_position)
 
-            # Aplicar daño múltiple según nivel de láser
-            for _ in range(self.damage_level):
-                if hit_asteroid and hit_asteroid.enabled:
-                    hit_asteroid.split()
+            # Apply damage
+            if hit_entity and hit_entity.enabled:
+                if hasattr(hit_entity, 'split') and hasattr(hit_entity, 'is_asteroid'):
+                    for _ in range(self.damage_level):
+                        hit_entity.split()
+                else:
+                    hit_entity.take_damage(self.damage_level)
             if hasattr(self, 'owner') and self.owner and getattr(self.owner, 'achievements', None):
-                self.owner.achievements.register_asteroid_destroyed(hit_asteroid)
-            if hasattr(self, 'pool'):
-                self.pool.return_object(self)
-            else:
-                destroy(self)
+                if hasattr(hit_entity, 'is_asteroid') and hit_entity.is_asteroid:
+                    self.owner.achievements.register_asteroid_destroyed(hit_entity)
+            self._cleanup()
 
 class BlackHoleProjectile(Entity):
     def __init__(self, ship_position, camera_forward, **kwargs):

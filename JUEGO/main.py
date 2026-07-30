@@ -166,8 +166,59 @@ class GlobalInputController(Entity):
     def __init__(self, game_instance, **kwargs):
         super().__init__(ignore_paused=True, **kwargs)
         self.game = game_instance
+        self.cheat_buffer = ""
+        self.last_key_time = 0
 
     def input(self, key):
+        from ships import AVAILABLE_SHIPS
+        
+        # Atajos de desarrollador para probar la IA Enemiga
+        if key == 'f5':
+            if hasattr(self.game, 'player') and self.game.player and not self.game.player.is_dead:
+                from enemy import EnemyShip
+                spawn_pos = self.game.player.position + self.game.player.forward * 100
+                EnemyShip("nave-alien-enemy", spawn_pos, self.game, is_boss=False)
+                print("Spawneado: nave-alien-enemy")
+        elif key == 'f6':
+            if hasattr(self.game, 'player') and self.game.player and not self.game.player.is_dead:
+                from enemy import EnemyShip
+                spawn_pos = self.game.player.position + self.game.player.forward * 100
+                EnemyShip("nave-altech-enemy", spawn_pos, self.game, is_boss=False)
+                print("Spawneado: nave-altech-enemy")
+        elif key == 'f7':
+            if hasattr(self.game, 'player') and self.game.player and not self.game.player.is_dead:
+                from enemy import EnemyShip
+                spawn_pos = self.game.player.position + self.game.player.forward * 250
+                EnemyShip("boss1-nodriza", spawn_pos, self.game, is_boss=True)
+                print("Spawneado: boss1-nodriza")
+        elif key == 'f8':
+            if hasattr(self.game, 'player') and self.game.player and not self.game.player.is_dead:
+                from enemy import EnemyShip
+                spawn_pos = self.game.player.position + self.game.player.forward * 150
+                EnemyShip("nave-exploradora", spawn_pos, self.game, is_npc=True)
+                print("Spawneado: nave-exploradora (NPC)")
+        
+        # Solo registrar teclas si el alien no está desbloqueado
+        if "nave-alien-enemy" not in AVAILABLE_SHIPS:
+            if len(key) == 1 and key.isalpha():
+                import time
+                current_time = time.time()
+                
+                # Si pasa más de 1.5 segundos entre teclas, reiniciar el buffer
+                if current_time - self.last_key_time > 1.5:
+                    self.cheat_buffer = ""
+                    
+                self.last_key_time = current_time
+                self.cheat_buffer += key.lower()
+                
+                if len(self.cheat_buffer) > 20:
+                    self.cheat_buffer = self.cheat_buffer[-20:]
+                    
+                if "astra" in self.cheat_buffer:
+                    self.cheat_buffer = "" # Limpiar tras activarse
+                    if hasattr(self.game, 'unlock_alien_ship'):
+                        self.game.unlock_alien_ship()
+        
         if key == 'f11':
             window.fullscreen = not window.fullscreen
             
@@ -305,7 +356,7 @@ class GameApp:
         from pool_manager import ObjectPool
         self.pool = ObjectPool()
         
-        self.environment = AsteroidManager(player=self.player, count=60, radius=300, pool=self.pool)
+        self.environment = AsteroidManager(player=self.player, count=120, radius=2500, pool=self.pool)
         self.space_dust = SpaceDustManager(player=self.player, count=200, radius=60)
         self.intro_cinematic = IntroCinematic(self.player)
         
@@ -527,6 +578,24 @@ class GameApp:
         camera.rotation = (0, 0, 0)
         mouse.locked = True
         application.paused = False
+            
+    def unlock_alien_ship(self):
+        from ships import AVAILABLE_SHIPS
+        if "nave-alien-enemy" not in AVAILABLE_SHIPS:
+            try:
+                from enemy_ships import ENEMY_SHIPS
+                AVAILABLE_SHIPS["nave-alien-enemy"] = ENEMY_SHIPS["nave-alien-enemy"]
+                
+                # Actualizar el menú si está inicializado
+                if hasattr(self, 'main_menu') and hasattr(self.main_menu, 'ship_menu'):
+                    self.main_menu.ship_menu.ship_keys = list(AVAILABLE_SHIPS.keys())
+                    self.main_menu.ship_menu.update_ui()
+                    
+                # Notificación visual y sonido
+                t = Text(parent=camera.ui, text="<cyan>¡CAZA ALIENÍGENA DESBLOQUEADO!", position=(0, 0.4), origin=(0, 0), scale=2.5, z=-10)
+                destroy(t, delay=3)
+            except ImportError:
+                pass
 
     def run(self):
         self.app.run()

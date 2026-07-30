@@ -236,7 +236,7 @@ class CosmicBackground(Entity):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         
-        self.star_radius = 2500
+        self.star_radius = 15000
         self.stars_container = Entity(parent=self)
         
         # Generar vértices para malla de puntos (Point Cloud)

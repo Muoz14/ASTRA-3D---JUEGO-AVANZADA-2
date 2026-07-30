@@ -184,19 +184,21 @@ class MenuDummyShip(Entity):
         for offset in config.thruster_offsets:
             local_offset = offset
             
-            # Limitar el tamaño máximo de los glows para evitar que ocupen toda la pantalla
-            # Si el config define un scale gigantesco, lo capamos a un valor estético razonable.
-            base_x = min(config.thruster_scale[0], 0.15)
-            base_y = min(config.thruster_scale[1], 0.15)
-            base_z = min(config.thruster_scale[2], 0.45)
+            # Desvincular de la escala gigantesca del menu (menu_scale) para usar el tamaño de config real
+            menu_scale_x = config.menu_scale[0] if hasattr(config, 'menu_scale') else config.scale[0]
+            menu_scale_y = config.menu_scale[1] if hasattr(config, 'menu_scale') else config.scale[1]
+            menu_scale_z = config.menu_scale[2] if hasattr(config, 'menu_scale') else config.scale[2]
             
+            # El thruster_scale del config está pensado para world_space, así que lo dividimos por la escala del menú
+            # y añadimos un pequeño boost (+30%) porque en el menú se ve mejor si son apenas más notorios
             local_scale = (
-                base_x * 1.5,
-                base_y * 1.5,
-                base_z * 2.0
+                (config.thruster_scale[0] / menu_scale_x) * 1.3,
+                (config.thruster_scale[1] / menu_scale_y) * 1.3,
+                (config.thruster_scale[2] / menu_scale_z) * 1.5
             )
             
-            glow = Entity(parent=self.bob_container, model='sphere', color=color.rgba(0, 255, 255, 200), unlit=True, scale=local_scale, position=local_offset)
+            thruster_color = getattr(config, 'thruster_color', color.rgba(0, 255, 255, 200))
+            glow = Entity(parent=self.bob_container, model='sphere', color=thruster_color, unlit=True, scale=local_scale, position=local_offset)
             self.thruster_glows.append(glow)
 
     def update(self):
@@ -499,6 +501,10 @@ class MainMenu(Entity):
                 if random.random() < 0.3:
                     MenuSpeedLine(color=color.rgba(100, 200, 255, 80), speed_mult=1.2, origin_x=curr_origin_x) 
                 self.speed_line_timer = 0.05
+        
+        # Mantener la UI alineada en todo momento (por si cambia el aspect ratio)
+        if hasattr(self, 'ui_container') and self.ui_container.enabled:
+            self.align_ui()
 
     def press_start(self):
         self.ui_container.disable()
@@ -519,6 +525,22 @@ class MainMenu(Entity):
 
     def align_ui(self):
         self.btn_exit.position = (window.right.x - 0.1, window.bottom.y + 0.05)
+        
+        # Adaptar dinámicamente el panel izquierdo a cualquier relación de aspecto
+        if hasattr(self, 'ui_bg'):
+            # El panel cubre exactamente desde el borde izquierdo hasta un ancho de 0.7
+            self.ui_bg.position = (window.left.x + 0.35, 0)
+            self.ui_bg.scale = (0.7, 2)
+            
+            ui_x = window.left.x + 0.08
+            self.title_text.x = ui_x
+            self.subtitle_text.x = ui_x
+            
+            self.btn_start.x = ui_x + 0.2
+            self.btn_score.x = ui_x + 0.2
+            self.btn_achievements.x = ui_x + 0.2
+            self.btn_options.x = ui_x + 0.2
+            self.btn_change_pilot.x = ui_x + 0.2
 
     def press_score(self):
         self.score_menu.open_score()
