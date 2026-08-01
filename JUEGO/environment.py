@@ -262,6 +262,9 @@ class CosmicBackground(Entity):
         # Lo centramos casi al frente del jugador (300 en X en lugar de 1200) y a 2200 metros de profundidad.
         self.planet = ShatteredPlanet(parent=self, position=(300, 200, 2200))
         
+        # Activar estrellas de alta calidad por defecto
+        self.set_quality('Alta')
+        
     def set_quality(self, quality):
         if quality == 'Baja':
             self.stars_low_entity.enabled = True
@@ -275,61 +278,46 @@ class CosmicBackground(Entity):
         self.stars_container.position = camera.world_position
 
 class SpaceDustManager(Entity):
-    def __init__(self, player, count=200, radius=60, **kwargs):
+    def __init__(self, player, count=100, radius=60, **kwargs):
         super().__init__(**kwargs)
         self.player = player
         self.radius = radius
         self.count = count
         
-        # OPCIÓN B (MÁS ÓPTIMA): Sistema de Nube de Puntos (Point Cloud)
-        # Generamos una lista de vectores en lugar de Entidades para cero overhead de CPU
-        self.vertices = [
-            Vec3(random.uniform(-radius, radius),
-                 random.uniform(-radius, radius),
-                 random.uniform(-radius, radius))
-            for _ in range(count)
-        ]
-        
-        # Un solo Mesh dibujando vértices como puntos (cero overdraw de GPU)
-        self.dust_mesh = Mesh(vertices=self.vertices, mode='point', thickness=5)
-        
-        self.dust_entity = Entity(
-            parent=self,
-            model=self.dust_mesh,
-            color=color.rgba(255, 255, 255, 180),
-            unlit=True
-        )
+        # Usaremos entidades simples con un material básico. Es más rápido que reconstruir el Mesh en cada frame
+        self.dust_particles = []
+        for _ in range(self.count):
+            p = Entity(
+                parent=self,
+                model='quad',
+                color=color.rgba(255, 255, 255, 180),
+                scale=0.15,
+                billboard=True,
+                unlit=True
+            )
+            self.dust_particles.append(p)
+            
+        self.reset_particles()
 
     def reset_particles(self):
-        self.vertices = [
-            Vec3(random.uniform(-self.radius, self.radius),
-                 random.uniform(-self.radius, self.radius),
-                 random.uniform(-self.radius, self.radius))
-            for _ in range(self.count)
-        ]
-        self.dust_mesh.vertices = self.vertices
-        self.dust_mesh.generate()
-        self.dust_entity.position = self.player.position
+        self.position = self.player.position
+        for p in self.dust_particles:
+            p.position = Vec3(random.uniform(-self.radius, self.radius),
+                              random.uniform(-self.radius, self.radius),
+                              random.uniform(-self.radius, self.radius))
 
     def update(self):
         if not self.player or self.player not in scene.entities: return
         
-        # La entidad sigue al jugador para que los vértices se mantengan en coordenadas locales
-        self.dust_entity.position = self.player.position
+        # El manager sigue al jugador
+        self.position = self.player.position
         
-        # Desplazamiento basado en la velocidad
         vel = self.player.forward * self.player.current_speed * time.dt
         radius_sq = self.radius ** 2
         
-        # Actualizamos la lista de vértices matemáticamente (mucho más rápido que actualizar entidades)
-        for i in range(self.count):
-            self.vertices[i] -= vel
+        # Actualizamos la posición local de las entidades (Panda3D las renderiza súper rápido)
+        for p in self.dust_particles:
+            p.position -= vel
             
-            # Si la partícula sale del radio (usamos distancia al cuadrado para mayor rapidez)
-            if self.vertices[i].length_squared() > radius_sq:
-                # Reaparece delante del jugador con una variación aleatoria
-                self.vertices[i] = self.player.forward * self.radius + Vec3(random.uniform(-30, 30), random.uniform(-30, 30), random.uniform(-10, 10))
-                
-        # Actualizamos y regeneramos la malla visual
-        self.dust_mesh.vertices = self.vertices
-        self.dust_mesh.generate()
+            if p.position.length_squared() > radius_sq:
+                p.position = self.player.forward * self.radius + Vec3(random.uniform(-30, 30), random.uniform(-30, 30), random.uniform(-10, 10))

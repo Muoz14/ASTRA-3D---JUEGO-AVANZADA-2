@@ -176,15 +176,29 @@ class GlobalInputController(Entity):
         if key == 'f5':
             if hasattr(self.game, 'player') and self.game.player and not self.game.player.is_dead:
                 from enemy import EnemyShip
+                import time
+                sq_id = f"squad_{time.time()}"
+                
+                # Líder
                 spawn_pos = self.game.player.position + self.game.player.forward * 100
-                EnemyShip("nave-alien-enemy", spawn_pos, self.game, is_boss=False)
-                print("Spawneado: nave-alien-enemy")
+                EnemyShip("nave-alien-enemy", spawn_pos, self.game, is_boss=False, is_leader=True, squadron_id=sq_id)
+                # Escoltas
+                EnemyShip("nave-alien-enemy", spawn_pos + self.game.player.right * 15 - self.game.player.forward * 15, self.game, is_boss=False, is_wingman=True, squadron_id=sq_id)
+                EnemyShip("nave-alien-enemy", spawn_pos - self.game.player.right * 15 - self.game.player.forward * 15, self.game, is_boss=False, is_wingman=True, squadron_id=sq_id)
+                print(f"Spawneado escuadrón Alien: {sq_id}")
         elif key == 'f6':
             if hasattr(self.game, 'player') and self.game.player and not self.game.player.is_dead:
                 from enemy import EnemyShip
+                import time
+                sq_id = f"squad_{time.time()}"
+                
+                # Líder
                 spawn_pos = self.game.player.position + self.game.player.forward * 100
-                EnemyShip("nave-altech-enemy", spawn_pos, self.game, is_boss=False)
-                print("Spawneado: nave-altech-enemy")
+                EnemyShip("nave-altech-enemy", spawn_pos, self.game, is_boss=False, is_leader=True, squadron_id=sq_id)
+                # Escoltas
+                EnemyShip("nave-altech-enemy", spawn_pos + self.game.player.right * 15 - self.game.player.forward * 15, self.game, is_boss=False, is_wingman=True, squadron_id=sq_id)
+                EnemyShip("nave-altech-enemy", spawn_pos - self.game.player.right * 15 - self.game.player.forward * 15, self.game, is_boss=False, is_wingman=True, squadron_id=sq_id)
+                print(f"Spawneado escuadrón Altech: {sq_id}")
         elif key == 'f7':
             if hasattr(self.game, 'player') and self.game.player and not self.game.player.is_dead:
                 from enemy import EnemyShip
@@ -357,7 +371,7 @@ class GameApp:
         self.pool = ObjectPool()
         
         self.environment = AsteroidManager(player=self.player, count=120, radius=2500, pool=self.pool)
-        self.space_dust = SpaceDustManager(player=self.player, count=200, radius=60)
+        self.space_dust = SpaceDustManager(player=self.player, count=100, radius=80)
         self.intro_cinematic = IntroCinematic(self.player)
         
         from cinematics import PlanetAnalysisCinematic
@@ -367,6 +381,10 @@ class GameApp:
         from missions import MissionManager
         self.mission_manager = MissionManager(player=self.player)
         self.player.mission_manager = self.mission_manager # Pasar referencia al jugador
+
+        from ai_director import AIDirector
+        self.ai_director = AIDirector(game_app=self)
+        self.ai_director.enabled = False
 
         self.player.enabled = False
         self.space_dust.enabled = False
@@ -443,11 +461,11 @@ class GameApp:
         self.cosmic_bg.set_quality(GameSettings.quality)
         
         if GameSettings.quality == 'Baja':
-            self.environment.count = 20
+            self.environment.count = 60
             self.space_dust.count = 0
             self.space_dust.enabled = False
         else:
-            self.environment.count = 60
+            self.environment.count = 150
             self.space_dust.count = 200
             self.space_dust.enabled = True
             self.space_dust.reset_particles()
@@ -457,6 +475,9 @@ class GameApp:
         self.achievement_manager.reset_run()
         self.player.change_ship(ship_id)
         self.player.reset_ship()
+        
+        self.ai_director.enabled = True
+        self.ai_director.spawn_timer = 2.0 # Spawn squad shortly after starting
         
         # Iniciar Misiones
         self.mission_manager.reset()
@@ -526,7 +547,14 @@ class GameApp:
             
         self.cosmic_bg.enabled = False
         self.space_dust.enabled = False
+        self.ai_director.enabled = False
         self.environment.clear_asteroids()
+        
+        # Limpiar enemigos que hayan quedado
+        from ursina import scene, destroy
+        for e in list(scene.entities):
+            if type(e).__name__ == 'EnemyShip':
+                destroy(e)
 
         camera.parent = scene
         camera.position = (0, 0, -20)
@@ -570,6 +598,13 @@ class GameApp:
         self.achievement_manager.reset_run()
         self.player.reset_ship()
         self.environment.clear_and_respawn()
+        
+        # Limpiar enemigos antes de reiniciar
+        from ursina import scene, destroy
+        for e in list(scene.entities):
+            if type(e).__name__ == 'EnemyShip':
+                destroy(e)
+                
         self.space_dust.reset_particles()
         self.game_over_menu.enabled = False
 
@@ -585,7 +620,6 @@ class GameApp:
             try:
                 from enemy_ships import ENEMY_SHIPS
                 AVAILABLE_SHIPS["nave-alien-enemy"] = ENEMY_SHIPS["nave-alien-enemy"]
-                
                 # Actualizar el menú si está inicializado
                 if hasattr(self, 'main_menu') and hasattr(self.main_menu, 'ship_menu'):
                     self.main_menu.ship_menu.ship_keys = list(AVAILABLE_SHIPS.keys())

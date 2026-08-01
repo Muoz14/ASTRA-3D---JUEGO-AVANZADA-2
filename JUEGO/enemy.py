@@ -6,12 +6,17 @@ from enemy_ai import build_basic_fighter_tree, build_boss_tree, build_npc_tree, 
 from weapons import DualLaser
 
 class EnemyShip(Entity):
-    def __init__(self, ship_id, spawn_position, game_app, is_boss=False, is_npc=False, is_minion=False, **kwargs):
+    active_ships = []
+
+    def __init__(self, ship_id, spawn_position, game_app, is_boss=False, is_npc=False, is_minion=False, is_leader=False, is_wingman=False, squadron_id=None, **kwargs):
         super().__init__(model=None, position=spawn_position, **kwargs)
         self.game = game_app
         self.is_boss = is_boss
         self.is_npc = is_npc
         self.is_minion = is_minion
+        self.is_leader = is_leader
+        self.is_wingman = is_wingman
+        self.squadron_id = squadron_id
         
         # Intentar cargar de ENEMY_SHIPS primero, si no, de AVAILABLE_SHIPS (para NPCs)
         self.config = ENEMY_SHIPS.get(ship_id)
@@ -27,10 +32,9 @@ class EnemyShip(Entity):
         self.scale = (1, 1, 1)
         self.visual = Entity(parent=self, model=self.config.model, scale=self.config.scale, rotation=getattr(self.config, 'model_rotation_offset', (0,0,0)))
         
-        from ursina import BoxCollider, Vec3
-        # Adjust collider size to be slightly smaller than the visual scale for fair gameplay
-        size = Vec3(self.config.scale[0] * 0.8, self.config.scale[1] * 0.8, self.config.scale[2] * 0.8)
-        self.collider = BoxCollider(self, center=Vec3(0,0,0), size=size)
+        from ursina import SphereCollider, Vec3
+        # Use SphereCollider for extremely robust hit detection regardless of ship orientation
+        self.collider = SphereCollider(self, center=Vec3(0,0,0), radius=5.5)
         
         # Stats
         self.max_health = getattr(self.config, 'max_health', 100)
@@ -43,7 +47,7 @@ class EnemyShip(Entity):
         self.target_speed = 0
         self.current_speed = 0
         
-        self.fire_rate = 1.0 # Dispara cada 1 segundo (ajustable)
+        self.fire_rate = 0.6 # Dispara cada 0.6 segundos (ajustable)
         self.fire_cooldown = 0
         
         # Nuevas mecánicas tácticas
@@ -51,6 +55,8 @@ class EnemyShip(Entity):
         self.heat = 0.0
         self.max_boost_fuel = 100.0
         self.boost_fuel = 100.0
+        
+        EnemyShip.active_ships.append(self)
         
         # Determinar facción
         if self.is_npc:
@@ -65,6 +71,11 @@ class EnemyShip(Entity):
         self.thrusters = []
         self._setup_thrusters()
         
+        # Marcador visual sobre la nave para no perderla de vista
+        # Un diamante brillante que siempre mira a la cámara (billboard=True)
+        if not self.is_npc:
+            self.visual_marker = Entity(parent=scene, model='sphere', color=color.red, scale=0.8, unlit=True, billboard=True)
+        
         # Behavior Tree Setup
         self.blackboard = Blackboard()
         self.blackboard.set("spawn_point", spawn_position)
@@ -76,7 +87,7 @@ class EnemyShip(Entity):
         elif self.is_minion:
             self.bt = build_basic_fighter_tree(detection_radius=15000) # Nunca nos pierde de vista
         else:
-            self.bt = build_basic_fighter_tree(detection_radius=1000) # Vagan por el espacio si nos alejamos mucho
+            self.bt = build_basic_fighter_tree(detection_radius=500) # Vagan por el espacio si nos alejamos mucho
             
     def _setup_thrusters(self):
         for offset in self.config.thruster_offsets:
@@ -105,21 +116,37 @@ class EnemyShip(Entity):
             
     def get_nearby_allies(self, radius=800):
         allies = []
-        for e in scene.entities:
-            if type(e).__name__ == "EnemyShip" and e != self:
+        for e in EnemyShip.active_ships:
+            if e != self and not getattr(e, 'is_dead', False):
                 if getattr(e, 'faction', None) == self.faction:
                     if distance(self.position, e.position) <= radius:
                         allies.append(e)
         return allies
         
     def shoot(self):
-        # Utiliza DualLaser de weapons.py (sin costo de calor ya que es enemigo)
+        # Calcular dirección hacia el jugador para mejorar la precisión (con dispersión para no ser aimbot)
+        aim_rot = self.rotation
+        if getattr(self, 'player', None):
+            from ursina import Entity, Vec3
+            dummy = Entity(position=self.position)
+            
+            # Error aleatorio para que se pueda esquivar con dash (ráfagas imprecisas)
+            # El error será de +/- 1.5 metros en el objetivo
+            error_offset = Vec3(random.uniform(-1.5, 1.5), random.uniform(-1.5, 1.5), random.uniform(-1.5, 1.5))
+            
+            # Apuntar hacia el jugador con el error añadido
+            dummy.look_at(self.player.position + error_offset)
+            aim_rot = dummy.rotation
+            from ursina import destroy
+            destroy(dummy)
+
+        # Utiliza DualLaser de weapons.py
         for offset in self.config.laser_offsets:
-            DualLaser(self.position, self.rotation, self.forward, self.right, self.up,
+            DualLaser(self.position, aim_rot, self.forward, self.right, self.up,
                       offset_x=offset[0] * self.config.scale[0], 
                       offset_y=offset[1] * self.config.scale[1],
                       offset_z=offset[2] * self.config.scale[2], 
-                      damage_level=1, owner=self, 
+                      damage_level=12, owner=self, 
                       laser_scale=(0.2, 0.2, 2.0), laser_color=self.config.laser_color)
                       
     def spawn_minions(self, minion_id, count):
@@ -156,7 +183,42 @@ class EnemyShip(Entity):
             p.animate_scale(0, duration=0.5, curve=curve.linear)
             destroy(p, delay=0.5)
             
+        if hasattr(self, 'visual_marker') and self.visual_marker:
+            destroy(self.visual_marker)
+            
+        # Spawn loot (Materiales comunes, preciosos, y raros)
+        if hasattr(self.game, 'player'):
+            from loot import MeteoriteFragment
+            
+            num_items = random.randint(1, 3)
+            if self.is_boss:
+                num_items = random.randint(5, 10)
+                
+            materials_list = [
+                {'name': 'HIERRO (Fe)', 'color': '#a14d26', 'desc': 'Uso Estructural'},
+                {'name': 'COBRE (Cu)', 'color': '#28795c', 'desc': 'Conductor Eléctrico'},
+                {'name': 'TITANIO (Ti)', 'color': '#5a6578', 'desc': 'Blindaje Pesado'},
+                {'name': 'ORO (Au)', 'color': '#c4a627', 'desc': 'Microtecnología'},
+                {'name': 'URANIO (U)', 'color': '#4d821a', 'desc': 'Núcleo Combustible'}
+            ]
+            
+            for _ in range(num_items):
+                r = random.random()
+                if r < 0.95:
+                    mat_data = random.choice(materials_list)
+                else:
+                    mat_data = {'name': 'ANTIMATERIA (Am)', 'color': '#ff00ff', 'desc': 'Energía Pura Exótica'}
+                    
+                drop_pos = self.world_position + Vec3(random.uniform(-10, 10), random.uniform(-10, 10), random.uniform(-10, 10))
+                item = MeteoriteFragment(self.game.player, drop_pos, mat_data)
+            
         destroy(self)
+
+    def on_destroy(self):
+        if hasattr(self, 'visual_marker') and self.visual_marker:
+            destroy(self.visual_marker)
+        if self in EnemyShip.active_ships:
+            EnemyShip.active_ships.remove(self)
 
     def update(self):
         if getattr(self, 'is_dead', False):
@@ -178,6 +240,13 @@ class EnemyShip(Entity):
         self.bt.tick(self, self.blackboard)
         if getattr(self, 'is_dead', False):
             return
+            
+        # Actualizar posición del marcador visual
+        if hasattr(self, 'visual_marker') and self.visual_marker:
+            self.visual_marker.position = self.world_position + Vec3(0, self.config.scale[1] * 2 + 5, 0)
+            if self.player:
+                dist = distance(self.visual_marker.position, self.player.position)
+                self.visual_marker.scale = max(0.8, dist / 80.0)
         
         if self.fire_cooldown > 0:
             self.fire_cooldown -= time.dt
@@ -203,11 +272,12 @@ class EnemyShip(Entity):
             self.position += self.forward * self.current_speed * time.dt
             
             # Limitar la generación de partículas para no saturar el rendimiento
-            if not hasattr(self, 'trail_timer'): self.trail_timer = 0
-            self.trail_timer -= time.dt
-            if self.trail_timer <= 0:
-                self.generate_trail()
-                self.trail_timer = 0.15 # Emitir estelas solo ~6 veces por segundo en lugar de 60
+            # DESACTIVADO para enemigos: generar partículas constantemente destruye los FPS cuando hay 10+ naves
+            # if not hasattr(self, 'trail_timer'): self.trail_timer = 0
+            # self.trail_timer -= time.dt
+            # if self.trail_timer <= 0:
+            #     self.generate_trail()
+            #     self.trail_timer = 0.15
             
             # Animar propulsores visuales
             for t in self.thrusters:

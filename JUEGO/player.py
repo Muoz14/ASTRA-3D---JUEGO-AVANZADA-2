@@ -217,13 +217,96 @@ class TacticalScanner:
             self.current_popup.fade_and_destroy()
             self.current_popup = None
 
+class RadarWidget(Entity):
+    def __init__(self, player, **kwargs):
+        super().__init__(parent=player.hud_container, **kwargs)
+        self.player = player
+        
+        self.border = Entity(parent=self, model='circle', color=color.rgba32(0, 255, 255, 60), scale=(1.05, 1.05), z=1.1, unlit=True)
+        self.bg = Entity(parent=self, model='circle', color=color.rgba32(5, 15, 25, 120), scale=(1, 1), z=1, unlit=True)
+        
+        self.blips_container = Entity(parent=self)
+        
+        # Crear mesh de triangulo mucho mas puntiagudo para que sea obvio cual es el frente
+        self.tri_mesh_player = __import__('ursina').Mesh(vertices=[(-0.25, -0.5, 0), (0.25, -0.5, 0), (0, 0.6, 0)])
+        self.center_blip = Entity(parent=self, model=self.tri_mesh_player, color=color.white, scale=(0.06, 0.06), z=-0.2, unlit=True, always_on_top=True)
+        
+        self.blips = []
+        self.max_range = 3000
+        
+        self.debug_text = __import__('ursina').Text(parent=self, text='', scale=3, y=-0.6, color=color.yellow)
+        
+    def update(self):
+        if not self.player or getattr(self.player, 'is_dead', False) or getattr(self.player, 'is_cinematic', False) or getattr(__import__('ursina').application, 'paused', False):
+            if self.bg.enabled:
+                self.bg.enabled = False
+                self.border.enabled = False
+                self.center_blip.enabled = False
+                for b in self.blips: b.enabled = False
+            return
+        else:
+            if not self.bg.enabled:
+                self.bg.enabled = True
+                self.border.enabled = True
+                self.center_blip.enabled = True
+                
+        import math
+        for b in self.blips:
+            b.enabled = False
+            
+        blip_idx = 0
+        
+        self.center_blip.rotation_z = self.player.rotation_y
+
+        for e in __import__('ursina').scene.entities:
+            # Prevenir assertions de NodePath vacío
+            if not e: continue
+            
+            # Solo procesar entidades que tengan las propiedades de un enemigo y estén habilitadas
+            if hasattr(e, 'faction') and e.faction != 'npc' and getattr(e, 'enabled', False) and getattr(e, 'health', 0) > 0 and e != self.player:
+                dist = distance(self.player.world_position, e.world_position)
+                if dist <= self.max_range:
+                    delta = e.world_position - self.player.world_position
+                    rx = delta.x
+                    rz = delta.z
+                    
+                    factor = 0.5 / self.max_range
+                    radar_x = rx * factor
+                    radar_y = rz * factor
+                    
+                    blip_dist = math.sqrt(radar_x**2 + radar_y**2)
+                    if blip_dist > 0.48:
+                        scale_f = 0.48 / blip_dist
+                        radar_x *= scale_f
+                        radar_y *= scale_f
+                    elif blip_dist < 0.08:
+                        # Mantener a los enemigos fuera del centro (debajo del jugador)
+                        scale_f = 0.08 / (blip_dist + 0.0001)
+                        radar_x *= scale_f
+                        radar_y *= scale_f
+                    
+                    if blip_idx < len(self.blips):
+                        blip = self.blips[blip_idx]
+                        blip.enabled = True
+                    else:
+                        blip_mesh = __import__('ursina').Mesh(vertices=[(-0.25, -0.5, 0), (0.25, -0.5, 0), (0, 0.6, 0)])
+                        blip = Entity(parent=self.blips_container, model=blip_mesh, color=color.red, scale=(0.05, 0.05), z=-0.1, unlit=True)
+                        self.blips.append(blip)
+                        
+                    blip.position = (radar_x, radar_y, -0.1)
+                    blip.rotation_z = e.rotation_y
+                    
+                    blip_idx += 1
+                    
+        self.debug_text.text = f"Enemies: {blip_idx}"
+
 class PlayerShip(Entity):
     def __init__(self, game_over_menu=None, game_app=None, ship_id="nave1", **kwargs):
         self.ship_id = ship_id
         config = AVAILABLE_SHIPS.get(ship_id, AVAILABLE_SHIPS["nave1"])
         
         super().__init__(model=None, position=(0, 0, 0), **kwargs)
-        self.collider = BoxCollider(self, center=Vec3(0,0,0), size=Vec3(*config.scale))
+        self.collider = SphereCollider(self, center=Vec3(0,0,0), radius=6.0)
         
         self.ship_model_entity = Entity(parent=self, model=config.model, color=config.ship_color, 
                                         scale=config.scale, rotation=getattr(config, 'model_rotation_offset', (0,0,0)))
@@ -238,17 +321,14 @@ class PlayerShip(Entity):
         
         # Target lock system
         self.locked_target = None
-        self.lock_marker = __import__('ursina').Entity(parent=__import__('ursina').camera.ui, model='quad', texture='circle', color=__import__('ursina').color.red, scale=0.05, enabled=False)
-        self.lock_marker.texture = None # Will draw it with quads just like scanner
-        
-        # Build 3D marker for lock
-        self.lock_3d = __import__('ursina').Entity(billboard=True, enabled=False)
-        c = __import__('ursina').color.rgb(255, 80, 80)
-        __import__('ursina').Entity(parent=self.lock_3d, model='quad', scale=(5.0, 0.2), position=(0, 2.5, 0), color=c, unlit=True)
-        __import__('ursina').Entity(parent=self.lock_3d, model='quad', scale=(5.0, 0.2), position=(0, -2.5, 0), color=c, unlit=True)
-        __import__('ursina').Entity(parent=self.lock_3d, model='quad', scale=(0.2, 5.0), position=(2.5, 0, 0), color=c, unlit=True)
-        __import__('ursina').Entity(parent=self.lock_3d, model='quad', scale=(0.2, 5.0), position=(-2.5, 0, 0), color=c, unlit=True)
-        self.lock_text = __import__('ursina').Text(parent=self.lock_3d, text='...', scale=20, y=4.5, billboard=True, origin=(0,0), color=c)
+        self.lock_ui = Entity(parent=camera.ui, enabled=False)
+        c = color.rgb(255, 80, 80)
+        # Cuadrado retícula
+        Entity(parent=self.lock_ui, model='quad', scale=(0.1, 0.005), position=(0, 0.05, 0), color=c, unlit=True)
+        Entity(parent=self.lock_ui, model='quad', scale=(0.1, 0.005), position=(0, -0.05, 0), color=c, unlit=True)
+        Entity(parent=self.lock_ui, model='quad', scale=(0.005, 0.1), position=(0.05, 0, 0), color=c, unlit=True)
+        Entity(parent=self.lock_ui, model='quad', scale=(0.005, 0.1), position=(-0.05, 0, 0), color=c, unlit=True)
+        self.lock_text = Text(parent=self.lock_ui, text='...', scale=1.0, y=0.08, origin=(0,0), color=c)
 
         
         # DEBUG: Mostrar posición para configurar misiones
@@ -283,6 +363,9 @@ class PlayerShip(Entity):
         mouse.locked = True
 
         self.hud_container = Entity(parent=camera.ui)
+        
+        # Inicializar radar DESPUES del hud_container
+        self.radar = RadarWidget(self, position=(window.top_left.x + 0.14, window.top_left.y - 0.20), scale=(0.18, 0.18))
 
         self.cine_text = Text(parent=camera.ui, text='', origin=(0, 0), position=(0, 0.15), scale=2,
                               color=color.rgba(255, 255, 255, 0), enabled=False, z=-5)
@@ -308,19 +391,6 @@ class PlayerShip(Entity):
 
         self.crosshair = Entity(parent=self.hud_container, model='circle', color=color.rgba(255, 255, 255, 200),
                                 scale=(0.006, 0.006), position=(0, 0), z=-1)
-
-        self.blackhole_icon = Entity(parent=self.hud_container, model='quad', color=color.rgba(150, 0, 200, 255),
-                                     scale=(0.06, 0.06), position=(0, -0.42), z=-1)
-        self.blackhole_text = Text(parent=self.hud_container, text='L.B.', position=(0, -0.42), origin=(0, 0), scale=1,
-                                   color=color.white, z=-1.1)
-
-        self.dash_icons = []
-        self.dash_base_x = -0.05
-        for i in range(2):
-            icon = Entity(parent=self.hud_container, model='quad', color=color.rgba(0, 255, 255, 255),
-                          scale=(0.04, 0.04), position=(self.dash_base_x + i * 0.1, -0.42), z=-1)
-            Text(parent=icon, text='>>', origin=(0, 0), scale=12, color=color.white, z=-0.1)
-            self.dash_icons.append(icon)
 
         self.screen_cracks = []
         for _ in range(8):
@@ -569,7 +639,7 @@ class PlayerShip(Entity):
                             invoke(pool.return_object, p, delay=duracion_vida + 0.05)
                         else:
                             destroy(p, delay=duracion_vida + 0.05)
-            self.trail_timer = 0.08  # OPTIMIZACIÓN: Bajamos DRASTICAMENTE la frecuencia de partículas
+            self.trail_timer = 0.15  # OPTIMIZACIÓN: Bajamos DRASTICAMENTE la frecuencia de partículas
 
     def start_dash(self, direction):
         if getattr(self, 'achievements', None):
@@ -625,10 +695,7 @@ class PlayerShip(Entity):
         self.scanner.clear_markers()
         self.scanner.active = False
         
-        
-        __import__('ursina').Entity(parent=self.lock_3d, model='quad', scale=(3.0, 0.1), position=(0, -1.5, 0), color=c, unlit=True)
-        __import__('ursina').Entity(parent=self.lock_3d, model='quad', scale=(0.1, 3.0), position=(1.5, 0, 0), color=c, unlit=True)
-        __import__('ursina').Entity(parent=self.lock_3d, model='quad', scale=(0.1, 3.0), position=(-1.5, 0, 0), color=c, unlit=True)
+        self.scanner.active = False
 
         if getattr(self.tactical_map, 'is_open', False):
             self.tactical_map.toggle()
@@ -719,22 +786,50 @@ class PlayerShip(Entity):
                                     closest_enemy = e
                 if closest_enemy:
                     self.locked_target = closest_enemy
-                    self.lock_3d.enabled = True
+                    self.lock_time = 0.0
+                    self.lock_ui.enabled = True
             
             if self.locked_target:
                 if getattr(self.locked_target, 'is_dead', False) or (self.locked_target.position - self.position).length() > 2000:
                     self.locked_target = None
-                    self.lock_3d.enabled = False
+                    self.lock_time = 0.0
+                    self.lock_ui.enabled = False
                 else:
-                    self.lock_3d.position = self.locked_target.position
+                    self.lock_time = getattr(self, 'lock_time', 0.0) + time.dt
+                    
+                    # Proyectar la posición 3D de la nave a la UI 2D
+                    try:
+                        screen_pos = __import__('ursina').world_position_to_screen_position(self.locked_target.position)
+                    except AttributeError:
+                        screen_pos = getattr(camera, 'world_position_to_screen_position', lambda x: Vec2(0,0))(self.locked_target.position)
+                        
+                    self.lock_ui.position = screen_pos
+                    
                     dist = int((self.locked_target.position - self.position).length())
-                    hp = getattr(self.locked_target, 'health', 0)
-                    self.lock_text.text = f'HP: {hp}\\nDIST: {dist}m'
+                    
+                    if self.lock_time < 1.0:
+                        self.lock_ui.rotation_z += 150 * time.dt
+                        self.lock_ui.scale = lerp(Vec3(1.5,1.5,1.5), Vec3(1,1,1), self.lock_time)
+                        self.lock_text.text = f'Fijando... {int(self.lock_time * 100)}%\nDIST: {dist}m'
+                        self.lock_text.color = color.rgb(255, 150, 0)
+                        for c in self.lock_ui.children:
+                            if type(c).__name__ != 'Text':
+                                c.color = color.rgb(255, 150, 0)
+                    else:
+                        self.lock_ui.rotation_z = 0
+                        self.lock_ui.scale = Vec3(1,1,1)
+                        hp = getattr(self.locked_target, 'health', 0)
+                        self.lock_text.text = f'FIJADO!\nHP: {hp}\nDIST: {dist}m'
+                        self.lock_text.color = color.red
+                        for c in self.lock_ui.children:
+                            if type(c).__name__ != 'Text':
+                                c.color = color.red
 
         else:
             self.locked_target = None
-            if hasattr(self, 'lock_3d'):
-                self.lock_3d.enabled = False
+            self.lock_time = 0.0
+            if hasattr(self, 'lock_ui'):
+                self.lock_ui.enabled = False
 
         new_pos_txt = f"POS: {int(self.x)}, {int(self.y)}, {int(self.z)}"
         if self.pos_debug.text != new_pos_txt:
@@ -933,7 +1028,7 @@ class PlayerShip(Entity):
             self.speed_line_timer -= time.dt
             if self.speed_line_timer <= 0:
                 SpeedLine() # Solo 1 por tick
-                self.speed_line_timer = 0.04 # Mucho menos frecuente
+                self.speed_line_timer = 0.08 # Mucho menos frecuente
         elif held_keys['w']:
             self.target_speed = self.normal_max_speed
         elif held_keys['s']:
@@ -1141,7 +1236,7 @@ class PlayerShip(Entity):
             true_aim_rotation = Vec3(self.base_pitch, self.rotation_y, self.rotation_z)
             from weapons import DualLaser
             
-            laser_dmg = 1 if self.laser_level < 2 else (2 if self.laser_level < 3 else 3)
+            laser_dmg = self.laser_level # De 1 a 5 de daño
             pool = getattr(self.game_app, 'pool', None) if hasattr(self, 'game_app') else None
             
             if pool:
@@ -1169,7 +1264,7 @@ class PlayerShip(Entity):
 
             self.shake_amount = clamp(self.shake_amount + 0.2, 0, 0.6)
             
-            heat_cost = 7 if self.laser_level < 4 else 4
+            heat_cost = max(3, 8 - self.laser_level) # De 7 (nivel 1) baja hasta 3 (nivel 5)
             self.heat += heat_cost
             
             min_rate = self.min_fire_rate if self.laser_level < 5 else max(0.05, self.min_fire_rate - 0.04)
@@ -1206,6 +1301,26 @@ class PlayerShip(Entity):
         if key == 'u':
             if not self.is_dead and not self.is_cinematic and not self.pause_menu_open and not getattr(self.tactical_map, 'is_open', False) and not getattr(self.inventory, 'is_open', False):
                 self.upgrades_ui.toggle()
+        if key == '1':
+            if not self.is_dead and hasattr(self, 'inventory'):
+                if self.shield >= self.max_shield:
+                    if not hasattr(self, 'heal_warning') or not self.heal_warning.enabled:
+                        self.heal_warning = Text(text="Integridad estructural al máximo", position=(0, -0.3), origin=(0,0), scale=1.5, color=color.orange)
+                        destroy(self.heal_warning, delay=1.5)
+                elif self.inventory.logic.items.get("Kit de Reparación", 0) > 0:
+                    # Heal 35%
+                    self.inventory.logic.remove_item("Kit de Reparación", 1)
+                    heal_amount = self.max_shield * 0.35
+                    self.repair_shield(heal_amount)
+                    
+                    # Mostrar texto de sanación
+                    if not hasattr(self, 'heal_text') or not self.heal_text.enabled:
+                        self.heal_text = Text(text="+35% Integridad", position=(0, -0.3), origin=(0,0), scale=2.0, color=color.lime)
+                        destroy(self.heal_text, delay=1.5)
+                else:
+                    if not hasattr(self, 'heal_warning') or not self.heal_warning.enabled:
+                        self.heal_warning = Text(text="No tienes Kits de Reparación", position=(0, -0.3), origin=(0,0), scale=1.5, color=color.red)
+                        destroy(self.heal_warning, delay=1.5)
         if key == 'r':
             if not self.is_barrel_rolling and not self.is_dead:
                 self.start_barrel_roll()

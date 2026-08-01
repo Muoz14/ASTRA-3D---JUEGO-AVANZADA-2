@@ -12,12 +12,23 @@ def smooth_look_at(entity, target_pos, speed=5):
     smooth_look_at.dummy.rotation = entity.rotation
     smooth_look_at.dummy.look_at(target_pos)
     
-    def clerp(a, b, t):
-        return a + ((b - a + 180) % 360 - 180) * t
+    # Prevenir que las naves se pongan de cabeza (bloqueamos el roll a 0 relativo al mundo)
+    smooth_look_at.dummy.rotation_z = 0
+
+    
+    def clerp_capped(a, b, t, max_turn):
+        from ursina import clamp
+        diff = ((b - a + 180) % 360 - 180)
+        step = diff * t
+        step = clamp(step, -max_turn, max_turn)
+        return a + step
         
-    entity.rotation_x = clerp(entity.rotation_x, smooth_look_at.dummy.rotation_x, time.dt * speed)
-    entity.rotation_y = clerp(entity.rotation_y, smooth_look_at.dummy.rotation_y, time.dt * speed)
-    entity.rotation_z = clerp(entity.rotation_z, smooth_look_at.dummy.rotation_z, time.dt * speed)
+    # Limitar el giro a un máximo de 100 grados por segundo independientemente de la diferencia angular
+    max_turn_per_frame = 100.0 * time.dt 
+    
+    entity.rotation_x = clerp_capped(entity.rotation_x, smooth_look_at.dummy.rotation_x, time.dt * speed, max_turn_per_frame)
+    entity.rotation_y = clerp_capped(entity.rotation_y, smooth_look_at.dummy.rotation_y, time.dt * speed, max_turn_per_frame)
+    entity.rotation_z = clerp_capped(entity.rotation_z, smooth_look_at.dummy.rotation_z, time.dt * speed, max_turn_per_frame)
 
 # ==========================================
 # MOTOR DE BEHAVIOR TREES (ARBOLES DE COMPORTAMIENTO)
@@ -160,8 +171,9 @@ class FindTargetAction(Action):
                 
         # 2. Comprobar otras naves en la escena (SOLO si no encontramos al jugador, o el jugador está muy lejos)
         if not closest_target:
-            for e in scene.entities:
-                if type(e).__name__ == "EnemyShip" and e != entity:
+            from enemy import EnemyShip
+            for e in EnemyShip.active_ships:
+                if e != entity and not getattr(e, 'is_dead', False):
                     # Los NPCs no atacan, así que no buscan objetivo
                     if my_faction == "npc": continue
                     
@@ -191,13 +203,30 @@ class DogfightAction(Action):
         if not target:
             return NodeStatus.FAILURE
             
+        # EVASIÓN DE OBSTÁCULOS (Prioridad Máxima)
+        from ursina import raycast
+        # Lanzar rayo hacia adelante para detectar asteroides o el planeta
+        hit_info = raycast(entity.world_position, entity.forward, distance=150, ignore=(entity,))
+        if hit_info.hit and hit_info.entity != target:
+            # Si vamos a chocar, la prioridad absoluta es esquivar
+            avoid_dir = hit_info.world_normal
+            # Girar agresivamente hacia la normal de la superficie (rebotar visualmente)
+            target_pos = entity.position + avoid_dir * 500
+            smooth_look_at(entity, target_pos, speed=4.0)
+            entity.target_speed = entity.config.max_speed * 0.8
+            return NodeStatus.RUNNING
+            
         dist = distance(entity.position, target.position)
         is_breaking = getattr(entity, "_is_breaking", False)
         
+        import time
+        if getattr(entity, "_break_cooldown", 0) > 0:
+            entity._break_cooldown -= time.dt
+
         if is_breaking:
-            import time
             if dist > self.min_dist + 100 or getattr(entity, "_break_timer", 0) <= 0:
                 entity._is_breaking = False
+                entity._break_cooldown = 5.0 # Toman el valor de pelear por 5 segundos
             else:
                 entity._break_timer -= time.dt
                 break_dir = getattr(entity, "_break_dir", entity.up)
@@ -207,9 +236,9 @@ class DogfightAction(Action):
                 return NodeStatus.RUNNING
                 
         # Comprobar si estamos demasiado cerca para iniciar maniobra evasiva
-        if dist < self.break_dist:
+        if not is_breaking and getattr(entity, "_break_cooldown", 0) <= 0 and dist < self.break_dist:
             entity._is_breaking = True
-            entity._break_timer = 2.0
+            entity._break_timer = 3.5
             import random
             dir_to_target = (target.position - entity.position).normalized()
             cross_vec = entity.up if abs(dir_to_target.y) < 0.9 else entity.right
@@ -219,19 +248,65 @@ class DogfightAction(Action):
             entity._break_dir = random.choice(offsets)
             
             target_pos = entity.position + entity._break_dir * 1000
-            smooth_look_at(entity, target_pos, speed=2.0)
+            smooth_look_at(entity, target_pos, speed=1.2)
             entity.target_speed = getattr(entity, 'boost_max_speed', 100)
             return NodeStatus.RUNNING
             
-        # Combate normal: apuntar al jugador
-        smooth_look_at(entity, target.position, speed=3.0)
+        # Combate táctico dinámico
+        import random
+        if not hasattr(entity, "_tactic_timer") or getattr(entity, "_tactic_timer", 0) <= 0:
+            entity._tactic_timer = random.uniform(2.0, 5.0)
+            entity._strafe_dir = random.choice([1, -1])
+            
+            # Elegir táctica de combate aleatoria (MÁS AGRESIVO)
+            options = ["ENGAGE", "ENGAGE", "ENGAGE", "FLANK", "FLANK", "REPOSITION"]
+            entity._tactic = random.choice(options)
+            
+            if entity._tactic == "REPOSITION":
+                # Irse lejos: un punto aleatorio a 300-500m (reducido para no huir tanto)
+                offsets = [target.forward, target.right, -target.right, target.up, -target.up]
+                chosen = random.choice(offsets)
+                entity._tactic_target = target.position + chosen * random.uniform(300, 500)
+            elif entity._tactic == "FLANK":
+                # Atacar desde un flanco o de frente (joust)
+                offsets = [target.right, -target.right, target.up, -target.up, target.forward]
+                chosen = random.choice(offsets)
+                entity._tactic_target = target.position + chosen * random.uniform(200, 400)
+                
+        entity._tactic_timer -= time.dt
         
-        if dist > self.min_dist:
-            # Lejos, acercarse a toda velocidad
+        # Aplicar la táctica actual
+        if entity._tactic == "ENGAGE":
+            # Combate directo, apuntar al jugador con giro suave
+            smooth_look_at(entity, target.position, speed=1.5)
+            if dist > self.min_dist:
+                entity.target_speed = entity.config.max_speed
+            else:
+                entity.target_speed = entity.config.max_speed * 0.4 # Frenar un poco al acercarse
+                # Strafe ligero
+                entity.position += entity.right * (entity._strafe_dir * entity.config.max_speed * 0.3) * time.dt
+                
+        elif entity._tactic == "REPOSITION":
+            # Volar hacia el punto de reposicionamiento, IGNORANDO al jugador visualmente
+            smooth_look_at(entity, entity._tactic_target, speed=1.0)
+            entity.target_speed = entity.config.max_speed * 1.2 # Huir rápido
+            # Si llegó al punto o está muy lejos del jugador, cambiar a ENGAGE
+            if distance(entity.position, entity._tactic_target) < 100 or dist > 800:
+                entity._tactic = "ENGAGE"
+                entity._tactic_timer = 4.0
+                
+        elif entity._tactic == "FLANK":
+            # Apuntar hacia el objetivo de flanqueo, pero si estamos cerca del flanco, apuntar al jugador
+            dist_to_flank = distance(entity.position, entity._tactic_target)
+            if dist_to_flank > 150:
+                smooth_look_at(entity, entity._tactic_target, speed=1.0)
+            else:
+                smooth_look_at(entity, target.position, speed=1.8) # Ya llegamos al flanco, encarar y atacar!
             entity.target_speed = entity.config.max_speed
-        else:
-            # En zona óptima de disparo, reducir un poco la velocidad para ganar más tiempo de tiro
-            entity.target_speed = entity.config.max_speed * 0.4
+            
+        # Sobrescribir táctica: si el jugador se acerca muchísimo, simplemente volar de frente (pasar de largo) para ganar distancia
+        if dist < self.min_dist - 40:
+            entity.target_speed = entity.config.max_speed
             
         return NodeStatus.RUNNING
 
@@ -293,10 +368,19 @@ class AttackAction(Action):
         if getattr(entity, 'heat', 0) >= getattr(entity, 'max_heat', 100):
             return NodeStatus.FAILURE
             
+        # No disparar si no estamos mirando hacia el objetivo
+        dir_to_target = (target.position - entity.position).normalized()
+        dot = dir_to_target.dot(entity.forward)
+        
+        # dot > 0.85 significa que el ángulo es un cono más amplio hacia el jugador
+        if dot < 0.85:
+            return NodeStatus.RUNNING
+            
         # Disparar si el arma está lista
-        if entity.fire_cooldown <= 0:
-            entity.shoot()
-            entity.fire_cooldown = entity.fire_rate
+        if getattr(entity, 'fire_cooldown', 0) <= 0:
+            if hasattr(entity, 'shoot'):
+                entity.shoot()
+            entity.fire_cooldown = getattr(entity, 'fire_rate', 1.0)
             # Consume calor
             if hasattr(entity, 'heat'):
                 entity.heat += 20.0
@@ -359,6 +443,64 @@ class KamikazeAction(Action):
             
         return NodeStatus.RUNNING
 
+class MineAsteroidAction(Action):
+    def tick(self, entity, blackboard):
+        # Solo el lider mina, los wingmen siguen
+        if getattr(entity, 'is_wingman', False):
+            return NodeStatus.FAILURE
+            
+        import random, time
+        from ursina import distance
+        target_asteroid = blackboard.get("mining_target")
+        
+        # Buscar un asteroide cercano si no tenemos uno y ha pasado un tiempo
+        if not target_asteroid:
+            if getattr(entity, '_mining_cooldown', 0) > 0:
+                entity._mining_cooldown -= time.dt
+                return NodeStatus.FAILURE
+                
+            if hasattr(entity, 'game') and hasattr(entity.game, 'environment'):
+                asteroids = getattr(entity.game.environment, 'asteroids', [])
+            else:
+                return NodeStatus.FAILURE
+                
+            if not asteroids: return NodeStatus.FAILURE
+            
+            # Ordenar por distancia (simplificado: tomar una muestra cercana)
+            close_asteroids = [a for a in asteroids if distance(entity.position, a.position) < 3000]
+            if not close_asteroids: return NodeStatus.FAILURE
+            
+            target_asteroid = random.choice(close_asteroids)
+            blackboard.set("mining_target", target_asteroid)
+            entity._mining_duration = random.uniform(5.0, 15.0)
+            
+        # Si el asteroide se destruyó o algo
+        if not target_asteroid or getattr(target_asteroid, 'is_dead', False):
+            blackboard.set("mining_target", None)
+            entity._mining_cooldown = random.uniform(10.0, 30.0)
+            return NodeStatus.FAILURE
+            
+        dist = distance(entity.position, target_asteroid.position)
+        smooth_look_at(entity, target_asteroid.position, speed=1.5)
+        
+        if dist > 300:
+            # Acercarse
+            entity.target_speed = entity.config.max_speed
+        else:
+            # Minar (disparar)
+            entity.target_speed = 0
+            if getattr(entity, 'fire_cooldown', 0) <= 0:
+                if hasattr(entity, 'shoot'):
+                    entity.shoot()
+                entity.fire_cooldown = getattr(entity, 'fire_rate', 1.0)
+                
+            entity._mining_duration -= time.dt
+            if entity._mining_duration <= 0:
+                blackboard.set("mining_target", None)
+                entity._mining_cooldown = random.uniform(10.0, 30.0)
+                
+        return NodeStatus.RUNNING
+
 class PatrolAction(Action):
     def __init__(self, patrol_radius):
         self.patrol_radius = patrol_radius
@@ -373,6 +515,14 @@ class PatrolAction(Action):
                           random.uniform(-self.patrol_radius, self.patrol_radius),
                           random.uniform(-self.patrol_radius, self.patrol_radius))
             target_waypoint = origin + offset
+            
+            # Mantener dentro del universo
+            player = getattr(entity, 'player', None)
+            max_bound = player.sector_radius - 2000 if player else 30000
+            target_waypoint.x = max(-max_bound, min(max_bound, target_waypoint.x))
+            target_waypoint.y = max(-max_bound, min(max_bound, target_waypoint.y))
+            target_waypoint.z = max(-max_bound, min(max_bound, target_waypoint.z))
+            
             blackboard.set("patrol_waypoint", target_waypoint)
             
         if distance(entity.position, target_waypoint) < 5:
@@ -381,8 +531,54 @@ class PatrolAction(Action):
             return NodeStatus.SUCCESS
             
         # Moverse al waypoint
-        smooth_look_at(entity, target_waypoint, speed=3.0)
+        smooth_look_at(entity, target_waypoint, speed=1.5)
         entity.target_speed = entity.config.max_speed * 0.5 # Patrulla a media velocidad
+        return NodeStatus.RUNNING
+
+class FollowLeaderAction(Action):
+    def tick(self, entity, blackboard):
+        # Buscar al líder
+        leader = getattr(entity, 'leader_entity', None)
+        if not leader or getattr(leader, 'is_dead', False):
+            from enemy import EnemyShip
+            for e in EnemyShip.active_ships:
+                if getattr(e, 'squadron_id', None) == getattr(entity, 'squadron_id', '') and getattr(e, 'is_leader', False) and not getattr(e, 'is_dead', False):
+                    leader = e
+                    break
+                
+        if not leader:
+            # Si el líder muere, nos convertimos en cazas libres
+            entity.is_wingman = False
+            entity.squadron_id = None
+            return NodeStatus.FAILURE
+            
+        # Volar en formación de V expandida
+        f_idx = getattr(entity, 'formation_index', 0)
+        
+        # Asignar posiciones específicas basadas en el índice
+        if f_idx == 0:
+            # Wingman derecho (cerca)
+            offset_right = 50
+            offset_back = 40
+        elif f_idx == 1:
+            # Wingman izquierdo (cerca)
+            offset_right = -50
+            offset_back = 40
+        else:
+            # Wingman derecho o izquierdo más atrás (o centro atrás)
+            offset_right = 0
+            offset_back = 80
+            
+        target_pos = leader.position - leader.forward * offset_back + leader.right * offset_right
+        
+        smooth_look_at(entity, target_pos, speed=2.0)
+        
+        dist = distance(entity.position, target_pos)
+        if dist > 20:
+            entity.target_speed = getattr(leader, 'current_speed', 50) * 1.5 # Acelerar para alcanzar al líder
+        else:
+            entity.target_speed = getattr(leader, 'current_speed', 50) # Igualar velocidad
+            
         return NodeStatus.RUNNING
 
 # --- ACCIONES DEL JEFE (NODRIZA) ---
@@ -415,6 +611,14 @@ class ChargeHomingLaserAction(Action):
 # ARBOLES PREFABRICADOS
 # ==========================================
 
+def safe_dist(e1, e2):
+    try:
+        if e1 and e2 and not getattr(e1, 'is_dead', False) and not getattr(e2, 'is_dead', False):
+            return distance(e1.position, e2.position)
+    except AssertionError:
+        pass
+    return 999999
+
 def build_basic_fighter_tree(detection_radius=1000):
     return Selector([
         Sequence([
@@ -427,7 +631,7 @@ def build_basic_fighter_tree(detection_radius=1000):
                 ]),
                 # 2. Evadir si está sobrecalentado o muy cerca
                 Sequence([
-                    Condition(lambda e, b: getattr(e, 'heat', 0) > 80 or distance(e.position, b.get("target_entity").position) < 30),
+                    Condition(lambda e, b: getattr(e, 'heat', 0) > 80 or safe_dist(e, b.get("target_entity")) < 30),
                     EvadeAction()
                 ]),
                 # 3. Combate normal (Moverse y Atacar en paralelo)
@@ -436,12 +640,17 @@ def build_basic_fighter_tree(detection_radius=1000):
                     DogfightAction(min_dist=150, break_dist=80),
                     # Ataque: si está a menos de 800 de distancia, ataca
                     Sequence([
-                        Condition(lambda e, b: distance(e.position, b.get("target_entity").position) < 800),
+                        Condition(lambda e, b: safe_dist(e, b.get("target_entity")) < 800),
                         AttackAction()
                     ])
                 ])
             ])
         ]),
+        Sequence([
+            Condition(lambda e, b: getattr(e, 'is_wingman', False) and getattr(e, 'squadron_id', None) is not None),
+            FollowLeaderAction()
+        ]),
+        MineAsteroidAction(),
         PatrolAction(patrol_radius=800)
     ])
 
@@ -455,7 +664,7 @@ def build_boss_tree():
                 Parallel([
                     MaintainDistanceAction(min_distance=800, max_distance=1200),
                     Sequence([
-                        Condition(lambda e, b: distance(e.position, b.get("target_entity").position) < 1500),
+                        Condition(lambda e, b: safe_dist(e, b.get("target_entity")) < 1500),
                         AttackAction()
                     ])
                 ])

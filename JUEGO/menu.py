@@ -16,6 +16,7 @@ class GameSettings:
     vol_music = 0.8
     vol_sfx = 1.0
     vol_ai = 1.0
+    ai_voice_enabled = True
 
     @classmethod
     def load(cls):
@@ -31,6 +32,7 @@ class GameSettings:
                     cls.vol_music = data.get('vol_music', 0.8)
                     cls.vol_sfx = data.get('vol_sfx', 1.0)
                     cls.vol_ai = data.get('vol_ai', 1.0)
+                    cls.ai_voice_enabled = data.get('ai_voice_enabled', True)
             except:
                 pass
 
@@ -45,7 +47,8 @@ class GameSettings:
                 'vol_master': cls.vol_master,
                 'vol_music': cls.vol_music,
                 'vol_sfx': cls.vol_sfx,
-                'vol_ai': cls.vol_ai
+                'vol_ai': cls.vol_ai,
+                'ai_voice_enabled': cls.ai_voice_enabled
             }, f)
 
 
@@ -190,12 +193,24 @@ class MenuDummyShip(Entity):
             menu_scale_z = config.menu_scale[2] if hasattr(config, 'menu_scale') else config.scale[2]
             
             # El thruster_scale del config está pensado para world_space, así que lo dividimos por la escala del menú
-            # y añadimos un pequeño boost (+30%) porque en el menú se ve mejor si son apenas más notorios
-            local_scale = (
-                (config.thruster_scale[0] / menu_scale_x) * 1.3,
-                (config.thruster_scale[1] / menu_scale_y) * 1.3,
-                (config.thruster_scale[2] / menu_scale_z) * 1.5
-            )
+            if config.id == "nave1":
+                local_scale = (
+                    (config.thruster_scale[0] / menu_scale_x) * 1.2,
+                    (config.thruster_scale[1] / menu_scale_y) * 1.2,
+                    (config.thruster_scale[2] / menu_scale_z) * 1.0
+                )
+            elif config.id == "boss1-nodriza":
+                local_scale = (
+                    (config.thruster_scale[0] / menu_scale_x) * 0.6,
+                    (config.thruster_scale[1] / menu_scale_y) * 0.6,
+                    (config.thruster_scale[2] / menu_scale_z) * 0.5
+                )
+            else:
+                local_scale = (
+                    (config.thruster_scale[0] / menu_scale_x) * 1.3,
+                    (config.thruster_scale[1] / menu_scale_y) * 1.3,
+                    (config.thruster_scale[2] / menu_scale_z) * 1.5
+                )
             
             thruster_color = getattr(config, 'thruster_color', color.rgba(0, 255, 255, 200))
             glow = Entity(parent=self.bob_container, model='sphere', color=thruster_color, unlit=True, scale=local_scale, position=local_offset)
@@ -286,8 +301,17 @@ class OptionsMenu(Entity):
         self.sl_ai = Slider(parent=self.audio_container, min=0, max=1, default=GameSettings.vol_ai, position=(-0.15, -0.25), scale=0.6, on_value_changed=self.on_ai_change)
         self.sl_ai.bg.color = color.white
         
-        Button(parent=self.audio_container, text='VOLVER', scale=(0.4, 0.08), position=(0, -0.40),
+        self.btn_ai_voice = Button(parent=self.audio_container, text=f'VOCES IA: {"ON" if GameSettings.ai_voice_enabled else "OFF"}',
+                                   scale=(0.3, 0.06), position=(0, -0.32), color=color.hex('#111111'), highlight_color=color.dark_gray,
+                                   on_click=self.toggle_ai_voice)
+        
+        Button(parent=self.audio_container, text='VOLVER', scale=(0.4, 0.08), position=(0, -0.42),
                color=color.dark_gray, highlight_color=color.gray, on_click=self.close_audio, z=-1)
+
+    def toggle_ai_voice(self):
+        GameSettings.ai_voice_enabled = not GameSettings.ai_voice_enabled
+        self.btn_ai_voice.text = f'VOCES IA: {"ON" if GameSettings.ai_voice_enabled else "OFF"}'
+        GameSettings.save()
 
     def _update_ai_volume(self):
         # Actualiza el volumen de la IA si está reproduciendo audio actualmente

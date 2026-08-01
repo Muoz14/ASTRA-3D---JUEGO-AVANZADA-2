@@ -133,36 +133,62 @@ class UpgradesUI(Entity):
         inst_y = 0.15
         
         for card, t_info, t_name, btn_upgrade, nombre, datos in self.disponibles_cards:
-            nivel, max_nivel = self.get_nivel(datos["tipo"])
-            if nivel < max_nivel:
-                card.original_enabled = True
-                card.y = disp_y
-                t_name.y = disp_y + 0.05
-                t_info.y = disp_y - 0.02
-                btn_upgrade.y = disp_y
-                disp_y -= 0.22
-                costo_str = " | ".join([f"{mat}: {cant}" for mat, cant in datos["costo"].items()])
-                t_info.text = f"{datos['desc']} [Nivel {nivel}/{max_nivel}]\nCosto: {costo_str}"
+            if datos["tipo"] == "consumible":
+                count = self.player.inventory.logic.items.get(nombre, 0)
+                if count < 5:
+                    card.original_enabled = True
+                    card.y = disp_y
+                    t_name.y = disp_y + 0.05
+                    t_info.y = disp_y - 0.02
+                    btn_upgrade.y = disp_y
+                    disp_y -= 0.22
+                    costo_str = " | ".join([f"{mat}: {self.player.inventory.logic.items.get(mat, 0)}/{cant}" for mat, cant in datos["costo"].items()])
+                    t_info.text = f"{datos['desc']}\nEn Bodega: {count}/5 | Costo: {costo_str}"
+                else:
+                    card.original_enabled = False
             else:
-                card.original_enabled = False
+                nivel, max_nivel = self.get_nivel(datos["tipo"])
+                if nivel < max_nivel:
+                    card.original_enabled = True
+                    card.y = disp_y
+                    t_name.y = disp_y + 0.05
+                    t_info.y = disp_y - 0.02
+                    btn_upgrade.y = disp_y
+                    disp_y -= 0.22
+                    costo_str = " | ".join([f"{mat}: {self.player.inventory.logic.items.get(mat, 0)}/{cant}" for mat, cant in datos["costo"].items()])
+                    t_info.text = f"{datos['desc']} [Nivel {nivel}/{max_nivel}]\nCosto: {costo_str}"
+                else:
+                    card.original_enabled = False
                 
         # Actualizar instaladas
         for card, t_info, t_name, nombre, datos in self.instaladas_cards:
-            nivel, max_nivel = self.get_nivel(datos.get("tipo", "none"))
-            if nivel > 1 or (datos.get("tipo") == "aspiradora" and nivel > 0) or datos.get("tipo") == "especial":
-                card.original_enabled = True
-                card.y = inst_y
-                t_name.y = inst_y + 0.05
-                t_info.y = inst_y - 0.02
-                inst_y -= 0.22
-                
-                if datos.get("tipo") != "especial":
-                    if nivel >= max_nivel:
-                        t_info.text = f"{datos['desc']} [NIVEL MÁXIMO ALCANZADO]"
-                    else:
-                        t_info.text = f"{datos['desc']} [Nivel {nivel}/{max_nivel}]"
+            if datos.get("tipo") == "consumible":
+                count = self.player.inventory.logic.items.get(nombre, 0)
+                if count > 0:
+                    card.original_enabled = True
+                    card.y = inst_y
+                    t_name.y = inst_y + 0.05
+                    t_info.y = inst_y - 0.02
+                    inst_y -= 0.22
+                    t_info.text = f"Consumible Listo para Usar\nEn Bodega: {count} (Usa la tecla C)"
+                else:
+                    card.original_enabled = False
             else:
-                card.original_enabled = False
+                nivel, max_nivel = self.get_nivel(datos.get("tipo", "none"))
+                if nivel > 1 or (datos.get("tipo") == "aspiradora" and nivel > 0) or datos.get("tipo") == "especial":
+                    card.original_enabled = True
+                    card.y = inst_y
+                    t_name.y = inst_y + 0.05
+                    t_info.y = inst_y - 0.02
+                    inst_y -= 0.22
+                    
+                    if datos.get("tipo") != "especial":
+                        if nivel >= max_nivel:
+                            t_info.text = f"{datos['desc']} [NIVEL MÁXIMO ALCANZADO]"
+                        else:
+                            t_info.text = f"{datos['desc']} [Nivel {nivel}/{max_nivel}]"
+                else:
+                    card.original_enabled = False
 
         self.update_scroll()
 
@@ -211,9 +237,9 @@ class UpgradesUI(Entity):
         if key == 'escape':
             self.toggle()
         
-        # Calcular el máximo scroll basado en el número de tarjetas activas
-        max_scroll_disp = max(0, sum(1 for c in self.disponibles_cards if c[0].enabled) * 0.22 - 0.4)
-        max_scroll_inst = max(0, sum(1 for c in self.instaladas_cards if c[0].enabled) * 0.22 - 0.4)
+        # Calcular el máximo scroll basado en el número de tarjetas activas (original_enabled)
+        max_scroll_disp = max(0, sum(1 for c in self.disponibles_cards if getattr(c[0], 'original_enabled', False)) * 0.22 - 0.4)
+        max_scroll_inst = max(0, sum(1 for c in self.instaladas_cards if getattr(c[0], 'original_enabled', False)) * 0.22 - 0.4)
         
         # Scroll up and down
         if key == 'scroll up':

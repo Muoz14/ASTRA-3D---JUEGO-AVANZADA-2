@@ -9,7 +9,7 @@ class ShipConfig:
     def __init__(self, id, name, model, scale, menu_scale, ship_color, max_speed, boost_max_speed, 
                  acceleration, friction, laser_offsets, thruster_offsets, description,
                  model_rotation_offset=(0,0,0), thruster_scale=(0.3, 0.3, 3.5), max_health=100, laser_scale=(0.2, 0.2, 2.0),
-                 dummy_config=None, laser_color=color.red, thruster_color=color.rgba(0, 255, 255, 200)):
+                 dummy_config=None, laser_color=color.red, thruster_color=color.rgba(0, 255, 255, 200), collider_size=(8, 4, 11)):
         self.id = id
         self.name = name
         self.model = model
@@ -29,6 +29,7 @@ class ShipConfig:
         self.dummy_config = dummy_config
         self.laser_color = laser_color
         self.thruster_color = thruster_color
+        self.collider_size = collider_size
 
 AVAILABLE_SHIPS = {
     "nave1": ShipConfig(
@@ -47,6 +48,7 @@ AVAILABLE_SHIPS = {
         thruster_scale=(0.20, 0.20, 0.40),
         description="Nave de exploración estándar. Equilibrada en velocidad y maniobrabilidad. Ideal para misiones largas y recolección de recursos.",
         max_health=100,
+        collider_size=(8, 4, 11),
         dummy_config=DummyConfig(scale_normal=(1.0, 1.0, 1.0), scale_large=(2.0, 2.0, 2.0))
     ),
     "nave2": ShipConfig(
@@ -67,6 +69,7 @@ AVAILABLE_SHIPS = {
         thruster_scale=(0.31, 0.31, 0.55),
         max_health=150,                   # AGUANTA MÁS GOLPES
         laser_scale=(0.2, 0.2, 2.0),      # Tamaño ajustado temporalmente para tuning
+        collider_size=(7, 3, 10),
         dummy_config=DummyConfig(scale_normal=(1.2, 1.2, 1.2), scale_large=(6.5, 6.5, 6.5))
     ),
     "nave-exploradora": ShipConfig(
@@ -88,6 +91,7 @@ AVAILABLE_SHIPS = {
         max_health=100,
         laser_scale=(0.2, 0.2, 2.0),      # Restaurado para que puedas afinar el "láser único"
         thruster_color=color.orange,      # Propulsores naranjas
+        collider_size=(7, 3, 10),
         dummy_config=DummyConfig(scale_normal=(1.0, 1.0, 1.0), scale_large=(2.0, 2.0, 2.0))
     )
 }

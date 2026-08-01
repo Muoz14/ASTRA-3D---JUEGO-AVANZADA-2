@@ -125,10 +125,23 @@ class DualLaser(Entity):
                             
                             def clerp(a, b, t):
                                 return a + ((b - a + 180) % 360 - 180) * t
+                            
+                            owner = getattr(self, 'owner', None)
+                            is_player = type(owner).__name__ == 'PlayerShip'
+                            is_locked = getattr(owner, 'lock_time', 0) >= 1.0
+                            
+                            if is_player:
+                                tracking_speed = 50.0 if is_locked else 0.0
+                            else:
+                                tracking_speed = 3.5
                                 
-                            self.rotation_x = clerp(self.rotation_x, self.dummy.rotation_x, time.dt * 3.5)
-                            self.rotation_y = clerp(self.rotation_y, self.dummy.rotation_y, time.dt * 3.5)
-                            self.rotation_z = clerp(self.rotation_z, self.dummy.rotation_z, time.dt * 3.5)
+                            if is_locked and is_player:
+                                # Aimbot absoluto si está fijado al 100%
+                                self.look_at(self.target.position)
+                            else:
+                                self.rotation_x = clerp(self.rotation_x, self.dummy.rotation_x, time.dt * tracking_speed)
+                                self.rotation_y = clerp(self.rotation_y, self.dummy.rotation_y, time.dt * tracking_speed)
+                                self.rotation_z = clerp(self.rotation_z, self.dummy.rotation_z, time.dt * tracking_speed)
                         else:
                             self.target = None
                     else:
@@ -147,20 +160,14 @@ class DualLaser(Entity):
             hit_info = __import__('ursina').raycast(
                 cola_laser,
                 self.forward,
-                distance=distancia_avance,
+                distance=remaining_dist,
                 ignore=ignore_list
             )
             
             if hit_info.hit:
                 if (hasattr(hit_info.entity, 'take_damage') or hasattr(hit_info.entity, 'is_asteroid')) and hit_info.entity != getattr(self, 'owner', None):
-                    # Prevent enemy lasers from damaging the player
-                    is_enemy_owner = type(getattr(self, 'owner', None)).__name__ == 'EnemyShip'
-                    is_player_target = type(hit_info.entity).__name__ == 'PlayerShip'
-                    if is_enemy_owner and is_player_target:
-                        ignore_list.append(hit_info.entity)
-                    else:
-                        hit_entity = hit_info.entity
-                        break
+                    hit_entity = hit_info.entity
+                    break
                 else:
                     ignore_list.append(hit_info.entity)
             else:
@@ -169,10 +176,26 @@ class DualLaser(Entity):
         if hit_entity:
             impact_position = hit_info.world_point if hit_info.hit else hit_entity.position
             
+            is_critical = False
+            if hit_entity and type(hit_entity).__name__ == 'EnemyShip':
+                # Check directional damage: if laser and enemy are pointing roughly the same way, it's a rear hit
+                if self.forward.dot(hit_entity.forward) > 0.5:
+                    is_critical = True
+
             from weapons import ExplosionParticle
-            for _ in range(random.randint(15, 25)):
-                if hasattr(self, 'pool'):
-                    self.pool.get_object(ExplosionParticle, pos=impact_position)
+            num_particles = random.randint(3, 4) if is_critical else random.randint(1, 2)
+            
+            # Intentar obtener el pool de objetos de forma segura
+            pool = None
+            if hasattr(self, 'owner') and self.owner:
+                if hasattr(self.owner, 'game_app'):
+                    pool = getattr(self.owner.game_app, 'pool', None)
+                elif hasattr(self.owner, 'player') and hasattr(self.owner.player, 'game_app'):
+                    pool = getattr(self.owner.player.game_app, 'pool', None)
+            
+            for _ in range(num_particles):
+                if pool:
+                    pool.get_object(ExplosionParticle, pos=impact_position, pool=pool)
                 else:
                     ExplosionParticle(pos=impact_position)
 
@@ -182,7 +205,8 @@ class DualLaser(Entity):
                     for _ in range(self.damage_level):
                         hit_entity.split()
                 else:
-                    hit_entity.take_damage(self.damage_level)
+                    final_damage = self.damage_level * 2.5 if is_critical else self.damage_level
+                    hit_entity.take_damage(final_damage)
             if hasattr(self, 'owner') and self.owner and getattr(self.owner, 'achievements', None):
                 if hasattr(hit_entity, 'is_asteroid') and hit_entity.is_asteroid:
                     self.owner.achievements.register_asteroid_destroyed(hit_entity)

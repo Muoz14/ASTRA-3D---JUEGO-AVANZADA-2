@@ -223,7 +223,14 @@ class CompanionManager(Entity):
             self.audio_player.stop()
             
         self.ui.show_message(visual_message)
-        self.tts.speak(audio_key)
+        
+        from menu import GameSettings
+        if getattr(GameSettings, 'ai_voice_enabled', True):
+            self.tts.speak(audio_key)
+        else:
+            # Si la voz está desactivada, simulamos que el audio comenzó para que el UI se oculte después de un tiempo
+            self._audio_confirmed_playing = True
+            invoke(self.ui.hide_message, delay=4.0)
         
         self.last_message_time = current_time
         
@@ -234,8 +241,8 @@ class CompanionManager(Entity):
 
     def on_damage_taken(self):
         current_time = time.time()
-        # Cooldown interno de 1.5s exclusivo para evitar spam de daño por colisiones múltiples
-        if current_time - getattr(self, '_last_damage_time', 0) < 1.5:
+        # Cooldown interno de 6.0s exclusivo para evitar spam de daño por colisiones múltiples
+        if current_time - getattr(self, '_last_damage_time', 0) < 6.0:
             return
             
         self._last_damage_time = current_time
@@ -249,4 +256,15 @@ class CompanionManager(Entity):
         
     def on_weapon_overheated(self):
         self._trigger_event("overheat", ignore_cooldown=True)
+        self.idle_timer = 0.0
+
+    def on_material_collected(self):
+        current_time = time.time()
+        # Cooldown de 8s para recolección de materiales
+        if current_time - getattr(self, '_last_loot_time', 0) < 8.0:
+            return
+            
+        self._last_loot_time = current_time
+        # Asumiendo que "idle" o algún evento genérico sirve, o si hay un evento específico de loot:
+        self._trigger_event("idle") # Usa idle por ahora ya que genera charlas esporádicas, o añade un tipo "loot" al generador
         self.idle_timer = 0.0

@@ -116,18 +116,23 @@ class MeteoriteFragment(Entity):
             
             if dist_sq < pickup_radius_sq * 4: # el equivalente a pickup_radius * 2
                 dir_to_player = (self.player.position - self.position).normalized()
-                self.velocity = lerp(self.velocity, dir_to_player * 15, time.dt * 4)
+                pull_speed = 15 + getattr(self.player, 'vacuum_level', 0) * 40
+                self.velocity = lerp(self.velocity, dir_to_player * pull_speed, time.dt * 6)
                 
-            # Rango de interacción para recolección manual
+            # Rango de interacción para recolección manual o automática
             interact_radius = 25.0
             if dist_sq < interact_radius ** 2:
-                if hasattr(self, 'prompt'):
-                    self.prompt.enabled = True
-                    simbolo = self.material_data['name'].split('(')[1].replace(')', '') if '(' in self.material_data['name'] else self.material_data['name']
-                    self.prompt.text = f"[F] Recoger {simbolo}"
+                # Si tenemos la aspiradora, recogemos automáticamente
+                has_vacuum = getattr(self.player, 'vacuum_level', 0) > 0
                 
-                # Recolección manual mediante la tecla F
-                if held_keys['f']:
+                if not has_vacuum:
+                    if hasattr(self, 'prompt'):
+                        self.prompt.enabled = True
+                        simbolo = self.material_data['name'].split('(')[1].replace(')', '') if '(' in self.material_data['name'] else self.material_data['name']
+                        self.prompt.text = f"[F] Recoger {simbolo}"
+                
+                # Recolección manual (con F) o automática (con aspiradora)
+                if has_vacuum or held_keys['f']:
                     if hasattr(self.player, 'inventory'):
                         added = self.player.inventory.logic.add_item(self.material_data['name'], 1)
                         if added:
@@ -136,6 +141,8 @@ class MeteoriteFragment(Entity):
                                 self.player.achievements.register_materials(1)
                             if hasattr(self.player, 'mission_manager'):
                                 self.player.mission_manager.increment_mission('sec_02')
+                            if hasattr(self.player, 'ai_companion'):
+                                self.player.ai_companion.on_material_collected()
                     
                     if hasattr(self, 'prompt'):
                         self.prompt.enabled = False
