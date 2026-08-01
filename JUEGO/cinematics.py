@@ -384,3 +384,258 @@ class PlanetAnalysisCinematic(Entity):
             self.player.mission_manager.complete_mission("main_01")
             self.player.mission_manager.ui.enable()
             self.player.mission_manager.waypoint.enable()
+
+class BossIntroCinematic(Entity):
+    def __init__(self, player, game_app, **kwargs):
+        super().__init__(ignore_paused=True, **kwargs)
+        self.player = player
+        self.game = game_app
+        self.is_playing = False
+        self.session_id = 0
+        
+        self.top_bar = Entity(parent=camera.ui, model='quad', color=color.black, scale=(2, 0.15), position=(0, 0.44), enabled=False, z=-5)
+        self.bottom_bar = Entity(parent=camera.ui, model='quad', color=color.black, scale=(2, 0.15), position=(0, -0.44), enabled=False, z=-5)
+        self.subtitle = Text(parent=camera.ui, text='', origin=(0, 0), position=(0, -0.44), scale=1.3, color=color.white, enabled=False, z=-6)
+        
+        # Mejor portal (anillos concéntricos)
+        self.portal = Entity(model='quad', texture='radial_gradient', color=color.rgba(255, 50, 0, 0), scale=(0, 0, 0), double_sided=True, unlit=True, enabled=False)
+        self.portal_ring1 = Entity(parent=self.portal, model=Cylinder(resolution=24, height=0.1), color=color.rgba(255, 100, 0, 200), scale=(1, 1, 1), rotation_x=90, unlit=True)
+        self.portal_ring2 = Entity(parent=self.portal, model=Cylinder(resolution=24, height=0.1), color=color.rgba(255, 200, 0, 150), scale=(0.8, 1.2, 0.8), rotation_x=90, unlit=True)
+        
+        self.escorts = []
+        self.mothership = None
+
+    def play(self):
+        if self.is_playing: return
+        self.session_id += 1
+        sid = self.session_id
+        self.is_playing = True
+        
+        self.player.is_cinematic = True
+        self.player.hud_container.disable()
+        if hasattr(self.player, 'mission_manager'):
+            self.player.mission_manager.ui.disable()
+            self.player.mission_manager.waypoint.disable()
+            
+        if hasattr(self.player, 'ai_companion') and hasattr(self.player.ai_companion, 'ui'):
+            self.player.ai_companion.ui.enabled = False
+
+        self.top_bar.enabled = True
+        self.bottom_bar.enabled = True
+        self.subtitle.enabled = True
+        
+        self.portal.enabled = True
+
+        self.execute_shot_1(sid)
+        invoke(self.execute_shot_2, sid, delay=5.0)
+        invoke(self.execute_shot_3, sid, delay=10.0)
+        invoke(self.end_cinematic, sid, delay=15.0)
+
+    def execute_shot_1(self, sid):
+        if sid != self.session_id: return
+        camera.parent = scene
+        
+        # El portal se abre enfrente del jugador
+        portal_pos = self.player.position + self.player.forward * 400
+        self.portal.position = portal_pos
+        self.portal.look_at(self.player.position)
+        
+        self.portal.scale = (0, 0, 0)
+        self.portal.color = color.rgba(255, 50, 0, 200)
+        self.portal.animate_scale(Vec3(150, 150, 150), duration=2.5, curve=curve.out_expo)
+        self.portal_ring1.animate_rotation((90, 0, 360), duration=10.0, curve=curve.linear)
+        self.portal_ring2.animate_rotation((90, 0, -360), duration=10.0, curve=curve.linear)
+        
+        # Cámara viendo cómo se abre el portal
+        camera.position = self.player.position + self.player.up * 30 - self.player.forward * 30
+        camera.look_at(self.portal.position)
+        camera.animate_position(self.player.position + self.player.up * 50 - self.player.forward * 10, duration=5.0, curve=curve.linear)
+        
+        self.subtitle.text = "<cyan>[SISTEMA IA]:<default>\n¡Alerta crítica! Ruptura masiva del espacio-tiempo detectada."
+        
+        # Instanciar a la Mothership saliendo del portal
+        from enemy import Mothership
+        self.mothership = Mothership(self.portal.position - self.portal.forward * 200, self.game)
+        self.mothership.is_cinematic_actor = True
+        # Sobreescribir rotación para que mire al jugador
+        self.mothership.look_at(self.player.position)
+        # Animarla saliendo lentamente
+        self.mothership.animate_position(self.portal.position + self.portal.forward * 100, duration=10.0, curve=curve.linear)
+
+    def execute_shot_2(self, sid):
+        if sid != self.session_id: return
+        
+        # Aparecen escoltas volando a toda velocidad, esparcidos
+        from enemy import EnemyShip
+        for i in range(8):
+            # Posición semi-aleatoria alrededor del portal
+            offset = Vec3(random.uniform(-80, 80), random.uniform(-40, 40), random.uniform(-20, 20))
+            pos = self.portal.position + offset - self.portal.forward * 20
+            e = EnemyShip("nave-altech-enemy", pos, self.game, is_minion=True)
+            e.is_cinematic_actor = True
+            e.look_at(self.player.position)
+            e.current_speed = random.uniform(90, 130)
+            self.escorts.append(e)
+            
+        camera.position = self.portal.position + self.portal.up * 80 + self.portal.right * 80
+        camera.look_at(self.mothership.position)
+        camera.animate_position(self.portal.position + self.portal.up * 50 + self.portal.right * 50, duration=5.0, curve=curve.linear)
+        
+        self.subtitle.text = "<red>[Nodriza Altech]:<default>\nIniciando secuencia de asimilación. Destruyan al piloto."
+
+    def execute_shot_3(self, sid):
+        if sid != self.session_id: return
+        
+        # Close up de la Nodriza
+        camera.position = self.mothership.position + self.mothership.forward * 80 + self.mothership.up * 20
+        camera.look_at(self.mothership.position)
+        camera.animate_position(self.mothership.position + self.mothership.forward * 40 + self.mothership.up * 10, duration=5.0, curve=curve.linear)
+        
+        self.subtitle.text = "<orange>[COMANDO TIERRA]:<default>\n¡Esa es la Nave Nodriza! Destrúyela y acabaremos con Altech en este cuadrante."
+
+    def end_cinematic(self, sid):
+        if sid != self.session_id: return
+        self.top_bar.enabled = False
+        self.bottom_bar.enabled = False
+        self.subtitle.enabled = False
+        self.subtitle.text = ''
+        
+        self.portal.enabled = False
+        
+        if hasattr(self, 'mothership') and self.mothership: self.mothership.is_cinematic_actor = False
+        for e in self.escorts: e.is_cinematic_actor = False
+        
+        self.is_playing = False
+        self.player.is_cinematic = False
+        self.player.hud_container.enable()
+        
+        if hasattr(self.player, 'ai_companion') and hasattr(self.player.ai_companion, 'ui'):
+            self.player.ai_companion.ui.enabled = True
+        
+        camera.parent = self.player.camera_pivot
+        camera.position = self.player.camera_modes[self.player.current_cam_index]
+        camera.rotation = (0, 0, 0)
+        
+        if hasattr(self.player, 'mission_manager'):
+            self.player.mission_manager.ui.enable()
+            self.player.mission_manager.waypoint.enable()
+            
+class AltechSquadCinematic(Entity):
+    def __init__(self, player, game_app, **kwargs):
+        super().__init__(ignore_paused=True, **kwargs)
+        self.player = player
+        self.game = game_app
+        self.is_playing = False
+        self.session_id = 0
+        
+        self.top_bar = Entity(parent=camera.ui, model='quad', color=color.black, scale=(2, 0.15), position=(0, 0.44), enabled=False, z=-5)
+        self.bottom_bar = Entity(parent=camera.ui, model='quad', color=color.black, scale=(2, 0.15), position=(0, -0.44), enabled=False, z=-5)
+        self.subtitle = Text(parent=camera.ui, text='', origin=(0, 0), position=(0, -0.44), scale=1.3, color=color.white, enabled=False, z=-6)
+        
+        self.target_pos = Vec3(8000, 2000, -8000)
+        self.squad = []
+
+    def play(self):
+        if self.is_playing: return
+        self.session_id += 1
+        sid = self.session_id
+        self.is_playing = True
+        
+        self.player.is_cinematic = True
+        self.player.hud_container.disable()
+        if hasattr(self.player, 'mission_manager'):
+            self.player.mission_manager.ui.disable()
+            self.player.mission_manager.waypoint.disable()
+            
+        if hasattr(self.player, 'ai_companion') and hasattr(self.player.ai_companion, 'ui'):
+            self.player.ai_companion.ui.enabled = False
+
+        self.top_bar.enabled = True
+        self.bottom_bar.enabled = True
+        self.subtitle.enabled = True
+        
+        self.execute_shot_1(sid)
+        invoke(self.execute_shot_2, sid, delay=4.0)
+        invoke(self.execute_shot_3, sid, delay=8.0)
+        invoke(self.end_cinematic, sid, delay=12.0)
+
+    def execute_shot_1(self, sid):
+        if sid != self.session_id: return
+        camera.parent = scene
+        
+        # Teletransportamos al jugador a la zona de combate para que esté cerca
+        self.player.position = self.target_pos - Vec3(0, 0, 500)
+        self.player.look_at(self.target_pos)
+        
+        # Generar las 8 naves Altech (las spawneamos esparcidas)
+        from enemy import EnemyShip
+        for i in range(8):
+            pos = self.target_pos + Vec3(random.uniform(-150, 150), random.uniform(-50, 50), random.uniform(-100, 100))
+            # La primera nave generada será la líder
+            e = EnemyShip("nave-altech-enemy", pos, self.game, is_boss=False, is_leader=(i==0))
+            e.is_cinematic_actor = True
+            # Que miren hacia donde el jugador va a llegar
+            e.look_at(self.player.position)
+            self.squad.append(e)
+            
+        # Plano general mostrando a las 8 naves esperando
+        camera.position = self.target_pos + Vec3(200, 100, -300)
+        camera.look_at(self.target_pos)
+        camera.animate_position(self.target_pos + Vec3(150, 50, -250), duration=4.0, curve=curve.linear)
+        
+        self.subtitle.text = "<cyan>[IA DE LA NAVE]:<default>\nLlegando a coordenadas. Múltiples contactos detectados."
+
+    def execute_shot_2(self, sid):
+        if sid != self.session_id: return
+        
+        # Plano desde atrás del escuadrón, viendo hacia el jugador acercándose
+        if len(self.squad) > 0:
+            leader = self.squad[0]
+            camera.position = leader.position + leader.forward * 50 + leader.up * 20
+            camera.look_at(self.player.position)
+            camera.animate_position(leader.position + leader.forward * 30 + leader.up * 10, duration=4.0, curve=curve.linear)
+        else:
+            camera.position = self.target_pos
+            camera.look_at(self.player.position)
+            
+        self.subtitle.text = "<red>[Transmisión Altech]:<default>\nIntruso en el sector. Activen protocolos de neutralización."
+
+    def execute_shot_3(self, sid):
+        if sid != self.session_id: return
+        
+        # La cámara muestra al jugador pasando a toda velocidad por un lado
+        camera.position = self.player.position + self.player.right * 60 + self.player.up * 10
+        camera.look_at(self.player.position + self.player.forward * 200)
+        # El jugador parece acelerar
+        self.player.current_speed = 100
+        
+        self.subtitle.text = "<orange>[COMANDO TIERRA]:<default>\n¡Rompan su formación! No dejen que escapen con esa tecnología."
+
+    def end_cinematic(self, sid):
+        if sid != self.session_id: return
+        self.top_bar.enabled = False
+        self.bottom_bar.enabled = False
+        self.subtitle.enabled = False
+        self.subtitle.text = ''
+        
+        self.is_playing = False
+        self.player.is_cinematic = False
+        self.player.hud_container.enable()
+        
+        if hasattr(self.player, 'ai_companion') and hasattr(self.player.ai_companion, 'ui'):
+            self.player.ai_companion.ui.enabled = True
+        
+        camera.parent = self.player.camera_pivot
+        camera.position = self.player.camera_modes[self.player.current_cam_index]
+        camera.rotation = (0, 0, 0)
+        
+        # Notificar a las misiones que el escuadrón fue spawneado
+        if hasattr(self.player, 'mission_manager'):
+            self.player.mission_manager.ui.enable()
+            self.player.mission_manager.waypoint.enable()
+            self.player.mission_manager.altech_squad_spawned = True
+            
+            # Cambiar el waypoint a no objetivo, es solo pelea
+            tracked = self.player.mission_manager.get_tracked_mission()
+            if tracked and tracked.id == "main_03":
+                tracked.target_pos = None

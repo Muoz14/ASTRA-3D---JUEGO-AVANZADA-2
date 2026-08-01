@@ -314,7 +314,9 @@ class PlayerShip(Entity):
         self.game_over_menu = game_over_menu
         self.game_app = game_app
         self.is_dead = False
+        self.session_time = 0
         self.is_cinematic = False
+        self.boss_cinematic_triggered = False
         self.pause_menu_open = False
         self.achievements = None
         self.scanner_warning = None
@@ -665,6 +667,8 @@ class PlayerShip(Entity):
 
 
     def take_damage(self, amount):
+        if self.is_cinematic: return
+        
         if hasattr(self, 'ai_companion'):
             self.ai_companion.on_damage_taken()
         if getattr(self, 'achievements', None):
@@ -756,9 +760,9 @@ class PlayerShip(Entity):
     def clear_persistent_ui(self):
         if hasattr(self, 'scanner') and self.scanner:
             self.scanner.clear_markers()
-            if hasattr(self.scanner, 'analyzing_text') and self.scanner.analyzing_text:
+            if hasattr(self, 'scanner', 'analyzing_text') and self.scanner.analyzing_text:
                 self.scanner.analyzing_text.enabled = False
-            if hasattr(self.scanner, 'scan_line') and self.scanner.scan_line:
+            if hasattr(self, 'scanner', 'scan_line') and self.scanner.scan_line:
                 self.scanner.scan_line.enabled = False
         if hasattr(self, 'oob_warning') and self.oob_warning:
             self.oob_warning.enabled = False
@@ -975,7 +979,7 @@ class PlayerShip(Entity):
                 camera.ui.y = 0
 
         hit_info = self.intersects()
-        if hit_info.hit:
+        if hit_info.hit and not self.is_cinematic:
             ent = hit_info.entity
             if hasattr(ent, 'is_planet'):
                 self.shield = 0
@@ -1191,6 +1195,11 @@ class PlayerShip(Entity):
             camera.x = base_cam_pos[0]
             camera.y = base_cam_pos[1]
 
+        # Actualizar timer de supervivencia para misión sec_06
+        self.survival_timer = getattr(self, 'survival_timer', 0) + time.dt
+        if getattr(self, 'mission_manager', None):
+            self.mission_manager.set_mission_progress("sec_06", int(self.survival_timer))
+            
         if held_keys['c']:
             camera.rotation_y = 180
             camera.z = -base_cam_pos[2] + dynamic_z_back
@@ -1285,11 +1294,31 @@ class PlayerShip(Entity):
             self.start_dash(1)
         if key == 'x':
             # 1. Comprobar misiones
-            target = getattr(self, 'mission_manager', None) and self.mission_manager.get_active_target()
-            if target and (self.world_position - target).length_squared() < 10000: # 100 metros de distancia al cuadrado
-                if hasattr(self, 'planet_cinematic') and not self.planet_cinematic.is_playing:
-                    self.planet_cinematic.play()
-                return
+            tracked = getattr(self, 'mission_manager', None) and self.mission_manager.get_tracked_mission()
+            if tracked and tracked.target_pos:
+                dist_sq = (self.world_position - tracked.target_pos).length_squared()
+                
+                if tracked.id == "main_01" and dist_sq < 10000:
+                    if hasattr(self, 'planet_cinematic') and not self.planet_cinematic.is_playing:
+                        self.planet_cinematic.play()
+                    return
+                elif tracked.id == "main_02" and dist_sq < 3000: # Mucho más estricto, hay que estar literalmente en la boya
+                    if hasattr(self.game_app, 'intercept_buoy_data'):
+                        self.game_app.intercept_buoy_data()
+                    return
+                elif tracked.id == "main_03":
+                    # Si no ha hackeado la nave, la comprobación se hace sobre el wreck (que es el target_pos cuando se actualiza)
+                    mm = getattr(self, 'mission_manager', None)
+                    if mm and mm.altech_wreck_spawned and not mm.altech_wreck_hacked:
+                        if dist_sq < 10000: # 100m aprox
+                            if hasattr(self.game_app, 'hack_altech_wreck'):
+                                self.game_app.hack_altech_wreck()
+                            return
+                    elif mm and not mm.altech_squad_spawned:
+                        if dist_sq < 250000: # 500m aprox
+                            if hasattr(self.game_app, 'start_altech_squad_cinematic'):
+                                self.game_app.start_altech_squad_cinematic()
+                            return
 
             # 2. Comportamiento normal del escáner
             if getattr(self.scanner, 'active', False):
@@ -1298,6 +1327,12 @@ class PlayerShip(Entity):
                     destroy(self.scanner_warning, delay=2.0)
             else:
                 self.scanner.toggle()
+        if key == '3':
+            mm = getattr(self, 'mission_manager', None)
+            if mm and getattr(mm, 'waiting_for_boss', False) and not self.boss_cinematic_triggered:
+                if hasattr(self.game_app, 'start_boss_cinematic'):
+                    self.boss_cinematic_triggered = True
+                    self.game_app.start_boss_cinematic()
         if key == 'u':
             if not self.is_dead and not self.is_cinematic and not self.pause_menu_open and not getattr(self.tactical_map, 'is_open', False) and not getattr(self.inventory, 'is_open', False):
                 self.upgrades_ui.toggle()

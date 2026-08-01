@@ -18,6 +18,9 @@ class EnemyShip(Entity):
         self.is_wingman = is_wingman
         self.squadron_id = squadron_id
         
+        # Modo actor para cinemáticas (se saltan la IA de ataque y seguimiento)
+        self.is_cinematic_actor = False
+        
         # Intentar cargar de ENEMY_SHIPS primero, si no, de AVAILABLE_SHIPS (para NPCs)
         self.config = ENEMY_SHIPS.get(ship_id)
         if not self.config:
@@ -186,6 +189,14 @@ class EnemyShip(Entity):
         if hasattr(self, 'visual_marker') and self.visual_marker:
             destroy(self.visual_marker)
             
+        # Actualizar misiones si muere una nave enemiga
+        if hasattr(self.game, 'player') and hasattr(self.game.player, 'mission_manager') and self.faction != 'npc':
+            if not self.is_boss:
+                self.game.player.mission_manager.increment_mission('sec_04')
+                self.game.player.mission_manager.increment_mission('sec_07')
+            else:
+                self.game.player.mission_manager.complete_mission('main_03')
+                
         # Spawn loot (Materiales comunes, preciosos, y raros)
         if hasattr(self.game, 'player'):
             from loot import MeteoriteFragment
@@ -274,6 +285,244 @@ class EnemyShip(Entity):
             # Limitar la generación de partículas para no saturar el rendimiento
             # DESACTIVADO para enemigos: generar partículas constantemente destruye los FPS cuando hay 10+ naves
             # if not hasattr(self, 'trail_timer'): self.trail_timer = 0
+            self.bt = build_basic_fighter_tree(detection_radius=500) # Vagan por el espacio si nos alejamos mucho
+            
+    def _setup_thrusters(self):
+        for offset in self.config.thruster_offsets:
+            t_scale = self.config.thruster_scale
+            scaled_offset = (offset[0] * self.config.scale[0], offset[1] * self.config.scale[1], offset[2] * self.config.scale[2])
+            # Creamos un propulsor visual sencillo para los enemigos (versión anterior no-masiva)
+            t = Entity(parent=self, model='sphere', unlit=True, color=self.config.thruster_color,
+                       scale=(t_scale[0], t_scale[1], t_scale[2]),
+                       position=scaled_offset)
+            self.thrusters.append(t)
+            
+    def generate_trail(self):
+        base_color = self.config.thruster_color
+        trail_color = color.rgba(base_color.r * 255, base_color.g * 255, base_color.b * 255, 100)
+        
+        # VERSIÓN ANTERIOR: Partículas simples, sin la dispersión masiva del jugador
+        for offset in self.config.thruster_offsets:
+            scaled_offset = (offset[0] * self.config.scale[0], offset[1] * self.config.scale[1], offset[2] * self.config.scale[2])
+            p = Entity(parent=self.game.scene if hasattr(self.game, 'scene') else scene, 
+                       model='sphere', color=trail_color, unlit=True,
+                       scale=random.uniform(0.06, 0.12) * self.config.scale[0], position=self.world_position + self.forward * scaled_offset[2] + self.right * scaled_offset[0] + self.up * scaled_offset[1])
+            # Dispersión normal hacia atrás
+            p.animate_position(p.position + (-self.forward * 2.0), duration=0.25, curve=curve.linear)
+            p.animate_scale(0, duration=0.25, curve=curve.linear)
+            destroy(p, delay=0.25)
+            
+    def get_nearby_allies(self, radius=800):
+        allies = []
+        for e in EnemyShip.active_ships:
+            if e != self and not getattr(e, 'is_dead', False):
+                if getattr(e, 'faction', None) == self.faction:
+                    if distance(self.position, e.position) <= radius:
+                        allies.append(e)
+        return allies
+        
+    def shoot(self):
+        # Calcular dirección hacia el jugador para mejorar la precisión (con dispersión para no ser aimbot)
+        aim_rot = self.rotation
+        if getattr(self, 'player', None):
+            from ursina import Entity, Vec3
+            dummy = Entity(position=self.position)
+            
+            # Error aleatorio para que se pueda esquivar con dash (ráfagas imprecisas)
+            # El error será de +/- 1.5 metros en el objetivo
+            error_offset = Vec3(random.uniform(-1.5, 1.5), random.uniform(-1.5, 1.5), random.uniform(-1.5, 1.5))
+            
+            # Apuntar hacia el jugador con el error añadido
+            dummy.look_at(self.player.position + error_offset)
+            aim_rot = dummy.rotation
+            from ursina import destroy
+            destroy(dummy)
+
+        # Utiliza DualLaser de weapons.py
+        for offset in self.config.laser_offsets:
+            DualLaser(self.position, aim_rot, self.forward, self.right, self.up,
+                      offset_x=offset[0] * self.config.scale[0], 
+                      offset_y=offset[1] * self.config.scale[1],
+                      offset_z=offset[2] * self.config.scale[2], 
+                      damage_level=12, owner=self, 
+                      laser_scale=(0.2, 0.2, 2.0), laser_color=self.config.laser_color)
+                      
+    def spawn_minions(self, minion_id, count):
+        # Spawnea secuencialmente naves desde su "helipuerto" (centro / abajo)
+        for i in range(count):
+            spawn_pos = self.world_position + self.down * 5 * self.config.scale[1] + self.right * random.uniform(-10, 10)
+            # Invoke el constructor de la nave, asegurando que se añade al juego
+            minion = EnemyShip(minion_id, spawn_pos, self.game, is_boss=False, is_minion=True)
+            
+    def fire_homing_laser(self, target):
+        # A desarrollar después: el super láser teledirigido.
+        # Por ahora, simplemente dispara una ráfaga masiva hacia adelante
+        self.shoot()
+        self.shoot()
+        self.shoot()
+            
+    def take_damage(self, amount):
+        self.health -= amount
+        # Flash rojo al recibir daño
+        self.visual.color = color.red
+        invoke(setattr, self.visual, 'color', color.white, delay=0.1)
+        
+        if self.health <= 0:
+            self.explode()
+            
+    def explode(self):
+        self.is_dead = True
+        # Partículas de explosión
+        for _ in range(15 if not self.is_boss else 50):
+            p = Entity(parent=scene, model='sphere', color=color.orange, unlit=True,
+                       position=self.world_position + Vec3(random.uniform(-2,2), random.uniform(-2,2), random.uniform(-2,2)) * self.config.scale[0],
+                       scale=random.uniform(0.5, 2.0) * self.config.scale[0])
+            p.animate_position(p.position + Vec3(random.uniform(-5,5), random.uniform(-5,5), random.uniform(-5,5)) * self.config.scale[0], duration=0.5, curve=curve.out_expo)
+            p.animate_scale(0, duration=0.5, curve=curve.linear)
+            destroy(p, delay=0.5)
+            
+        if hasattr(self, 'visual_marker') and self.visual_marker:
+            destroy(self.visual_marker)
+            
+        # Actualizar misiones si muere una nave enemiga
+        if hasattr(self.game, 'player') and hasattr(self.game.player, 'mission_manager') and getattr(self, 'faction', None) != 'npc':
+            mm = self.game.player.mission_manager
+            if not self.is_boss:
+                mm.increment_mission('sec_04')
+                mm.increment_mission('sec_07')
+                
+                # Check for Altech Squad
+                if getattr(mm, 'current_batch', 0) == 3 and getattr(mm, 'altech_squad_spawned', False) and not getattr(mm, 'altech_wreck_spawned', False):
+                    mm.altech_squad_kills += 1
+                    # Si el líder muere, spawneamos la chatarra (el líder será el último vivo)
+                    if self.is_leader:
+                        if hasattr(self.game, 'spawn_altech_wreck'):
+                            self.game.spawn_altech_wreck(self.world_position)
+            else:
+                mm.complete_mission('main_03')
+                
+        # Spawn loot (Materiales comunes, preciosos, y raros)
+        if hasattr(self.game, 'player'):
+            from loot import MeteoriteFragment
+            
+            num_items = random.randint(1, 3)
+            if self.is_boss:
+                num_items = random.randint(5, 10)
+                
+            materials_list = [
+                {'name': 'HIERRO (Fe)', 'color': '#a14d26', 'desc': 'Uso Estructural'},
+                {'name': 'COBRE (Cu)', 'color': '#28795c', 'desc': 'Conductor Eléctrico'},
+                {'name': 'TITANIO (Ti)', 'color': '#5a6578', 'desc': 'Blindaje Pesado'},
+                {'name': 'ORO (Au)', 'color': '#c4a627', 'desc': 'Microtecnología'},
+                {'name': 'URANIO (U)', 'color': '#4d821a', 'desc': 'Núcleo Combustible'}
+            ]
+            
+            for _ in range(num_items):
+                r = random.random()
+                if r < 0.95:
+                    mat_data = random.choice(materials_list)
+                else:
+                    mat_data = {'name': 'ANTIMATERIA (Am)', 'color': '#ff00ff', 'desc': 'Energía Pura Exótica'}
+                    
+                drop_pos = self.world_position + Vec3(random.uniform(-10, 10), random.uniform(-10, 10), random.uniform(-10, 10))
+                item = MeteoriteFragment(self.game.player, drop_pos, mat_data)
+            
+        destroy(self)
+
+    def on_destroy(self):
+        if hasattr(self, 'visual_marker') and self.visual_marker:
+            destroy(self.visual_marker)
+        if self in EnemyShip.active_ships:
+            EnemyShip.active_ships.remove(self)
+
+    def update(self):
+        if getattr(self, 'is_dead', False):
+            return
+            
+        # Despawn automático para NPCs que se alejan demasiado
+        if self.is_npc and hasattr(self, 'game') and hasattr(self.game, 'player'):
+            dist = (self.position - self.game.player.position).length()
+            if dist > self.game.player.sector_radius:
+                destroy(self)
+                return
+
+        # Tick del Behavior Tree
+        if hasattr(self.game, 'player') and self.game.player:
+            self.player = self.game.player
+        else:
+            self.player = None
+            
+        self.bt.tick(self, self.blackboard)
+        if getattr(self, 'is_dead', False):
+            return
+            
+        # Comportamiento especial de IA (Líder / Cinemática)
+        if self.is_cinematic_actor:
+            # Los actores de cinemática detienen su velocidad gradualmente y no disparan
+            self.target_speed = lerp(self.current_speed, 0, time.dt)
+            self.fire_cooldown = 1.0 # Nunca disparan
+        elif self.is_leader:
+            # Si es el líder del escuadrón 3, evaluamos si huye o ataca
+            # Comprobar si hay otras naves vivas (sin contar al jugador ni a este líder)
+            from enemy import EnemyShip
+            allies = [e for e in EnemyShip.active_ships if e != self and not getattr(e, 'is_dead', False) and getattr(e, 'faction', None) != 'npc']
+            if len(allies) > 0:
+                # Huir / Evasión extrema
+                if self.player:
+                    dir_away = (self.world_position - self.player.position).normalized()
+                    self.target_speed = self.boost_max_speed
+                    # Buscar una rotación que nos aleje del jugador
+                    from ursina import Entity, destroy
+                    dummy = Entity(position=self.world_position)
+                    dummy.look_at(self.world_position + dir_away * 100)
+                    self.rotation = slerp(self.rotation, dummy.rotation, time.dt * 2)
+                    destroy(dummy)
+            else:
+                # Está solo, Modo Agresivo Extremo
+                self.config.acceleration = 60 # Más rápido
+                self.config.turn_speed = 120 # Giros bruscos
+                self.target_speed = self.boost_max_speed
+                self.fire_cooldown = max(0, self.fire_cooldown)
+                
+                # Apuntar y disparar agresivamente
+                if self.player:
+                    self.look_at(self.player.position)
+                    if distance(self.position, self.player.position) < 1200:
+                        self.shoot()
+            
+        # Actualizar posición del marcador visual
+        if hasattr(self, 'visual_marker') and self.visual_marker:
+            self.visual_marker.position = self.world_position + Vec3(0, self.config.scale[1] * 2 + 5, 0)
+            if self.player:
+                dist = distance(self.visual_marker.position, self.player.position)
+                self.visual_marker.scale = max(0.8, dist / 80.0)
+        
+        if self.fire_cooldown > 0:
+            self.fire_cooldown -= time.dt
+            
+        # Regenerar tácticas
+        if self.heat > 0:
+            self.heat = max(0.0, self.heat - 25.0 * time.dt)
+        if self.boost_fuel < self.max_boost_fuel:
+            self.boost_fuel = min(self.max_boost_fuel, self.boost_fuel + 15.0 * time.dt)
+            
+        # Movimiento físico con lerp (igual que el jugador)
+        lerp_factor = self.acceleration if self.target_speed > self.current_speed else self.friction
+        self.current_speed = lerp(self.current_speed, self.target_speed, time.dt * lerp_factor)
+        
+        self.current_speed = clamp(self.current_speed, -self.max_speed, self.boost_max_speed)
+        
+        # DEBUG: print speed if fighting
+        if hasattr(self, 'bt') and self.target_speed != 0:
+            pass # print(f"Speed: {self.current_speed:.2f} / {self.target_speed:.2f}")
+
+        if abs(self.current_speed) > 1.0:
+            # Avanza en la dirección a la que mira
+            self.position += self.forward * self.current_speed * time.dt
+            
+            # Limitar la generación de partículas para no saturar el rendimiento
+            # DESACTIVADO para enemigos: generar partículas constantemente destruye los FPS cuando hay 10+ naves
+            # if not hasattr(self, 'trail_timer'): self.trail_timer = 0
             # self.trail_timer -= time.dt
             # if self.trail_timer <= 0:
             #     self.generate_trail()
@@ -281,7 +530,50 @@ class EnemyShip(Entity):
             
             # Animar propulsores visuales
             for t in self.thrusters:
-                t.scale_z = lerp(t.scale_z, self.config.thruster_scale[2] + random.uniform(0.1, 0.3), time.dt * 10)
+                if self.target_speed > 10:
+                    t.scale_z = lerp(t.scale_z, random.uniform(self.config.thruster_scale[2]*1.5, self.config.thruster_scale[2]*2.5), time.dt * 12)
+                else:
+                    t.scale_z = lerp(t.scale_z, self.config.thruster_scale[2], time.dt * 6)
         else:
             for t in self.thrusters:
                 t.scale_z = lerp(t.scale_z, self.config.thruster_scale[2], time.dt * 5)
+
+class Mothership(EnemyShip):
+    def __init__(self, spawn_position, game_app, **kwargs):
+        # Usamos la base de boss1-nodriza
+        super().__init__("boss1-nodriza", spawn_position, game_app, is_boss=True, **kwargs)
+        
+        self.max_health = 3000
+        self.health = self.max_health
+        
+        # Escalar 3 veces el tamaño (la escala se propaga a visual y propulsores)
+        self.scale = (3, 3, 3)
+        
+        # Ajustar colisionador a la nueva escala
+        from ursina import SphereCollider, Vec3
+        self.collider = SphereCollider(self, center=Vec3(0,0,0), radius=3.5)
+        
+        self.spawn_timer = 20.0
+        
+        # Diálogos iniciales
+        if hasattr(self.game, 'player') and hasattr(self.game.player, 'ai_companion'):
+            self.game.player.ai_companion.trigger_dialogue([
+                ("Nodriza Altech: Piloto, has interferido demasiado en nuestros planes.", 4.0),
+                ("Nodriza Altech: Tu nave y su IA serán asimiladas por nuestra tecnología superior.", 4.5),
+                ("IA: Detecto firmas de energía masivas. Precaución extrema.", 3.5),
+                ("Tierra: Destruye sus escoltas y ataca el núcleo central. ¡Es nuestra única oportunidad!", 4.5)
+            ])
+            
+    def update(self):
+        super().update()
+        if getattr(self, 'is_dead', False): return
+        
+        # Spawneo periódico de minions (cazas)
+        self.spawn_timer -= time.dt
+        if self.spawn_timer <= 0:
+            self.spawn_timer = random.uniform(20.0, 30.0)
+            self.spawn_minions("nave-altech-enemy", 2)
+            if hasattr(self.game, 'player') and hasattr(self.game.player, 'ai_companion'):
+                self.game.player.ai_companion.trigger_dialogue([
+                    ("IA: Alerta. La Nodriza está desplegando cazas de escolta.", 3.0)
+                ])

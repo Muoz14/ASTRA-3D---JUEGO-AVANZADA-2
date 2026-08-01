@@ -479,46 +479,142 @@ class GameApp:
         self.ai_director.enabled = True
         self.ai_director.spawn_timer = 2.0 # Spawn squad shortly after starting
         
-        # Iniciar Misiones
+        # Iniciar Misiones directamente en el Lote 2 (Para Pruebas)
         self.mission_manager.reset()
-        self.mission_manager.add_mission(
-            id="main_01",
-            title="Investiga la Anomalía",
-            description="Llega a la cima del Planeta Fracturado y analízalo usando el escáner incorporado en tu nave para descifrar su origen.",
-            short_description="Analiza la cima del Planeta Fracturado.",
-            target_pos=Vec3(291, 1130, 2193),
-            is_main=True
-        )
-        self.mission_manager.add_mission(
-            id="sec_01",
-            title="Limpieza Orbital",
-            description="El sector está plagado de asteroides inestables. Destruye 25 asteroides pequeños para despejar la ruta de navegación.",
-            short_description="Destruye 25 asteroides pequeños.",
-            is_main=False,
-            max_progress=25
-        )
-        self.mission_manager.add_mission(
-            id="sec_02",
-            title="Recolector de Recursos",
-            description="Destruye asteroides para encontrar y extraer 15 fragmentos de minerales raros que nos servirán para mejorar la nave.",
-            short_description="Extrae 15 fragmentos minerales.",
-            is_main=False,
-            max_progress=15
-        )
-        self.mission_manager.add_mission(
-            id="sec_03",
-            title="Exploración Profunda",
-            description="Navega 15,000 metros a través de los peligrosos escombros del cuadrante para cartografiar la zona de forma segura.",
-            short_description="Navega 15,000 metros.",
-            is_main=False,
-            max_progress=15000
-        )
+        self.mission_manager.current_batch = 1
+        self.mission_manager.advance_batch()
         
         self.mission_manager.ui.enable()
         self.mission_manager.waypoint.enable()
         
-        self.intro_cinematic.play()
+        # Saltamos la cinemática para probar
+        # self.intro_cinematic.play()
+        
+        self.player.enabled = True
+        self.player.position = (0, 0, 0)
+        self.player.rotation = (0, 0, 0)
+        
+        from ursina import camera
+        camera.parent = self.player.camera_pivot
+        camera.position = self.player.camera_modes[self.player.current_cam_index]
+        camera.world_rotation = (0, 0, 0)
+        camera.rotation = (0, 0, 0)
+        
+        self.player.is_cinematic = False
+        if hasattr(self.player, 'hud_container'):
+            self.player.hud_container.enable()
+        if hasattr(self.player, 'ai_companion') and hasattr(self.player.ai_companion, 'ui'):
+            self.player.ai_companion.ui.enabled = True
+            
         mouse.locked = True
+
+    def intercept_buoy_data(self):
+        # Desaparecer la boya físicamente
+        if hasattr(self.mission_manager, 'altech_buoy') and self.mission_manager.altech_buoy:
+            from ursina import destroy
+            destroy(self.mission_manager.altech_buoy)
+            self.mission_manager.altech_buoy = None
+            
+        self.mission_manager.complete_mission("main_02")
+        if hasattr(self.player, 'ai_companion'):
+            self.player.ai_companion.trigger_dialogue([
+                ("IA: Conectando a los sistemas de la boya Altech...", 4.0),
+                ("Tierra: Piloto, estamos recibiendo la transmisión. Desencriptando...", 4.5),
+                ("Tierra: Dios mío... ¡Es tecnología terrestre! Altech es una corporación humana operando en las sombras.", 6.5),
+                ("Tierra: Sus registros indican que han estado robando tecnología de una antigua civilización alienígena.", 6.5),
+                ("IA: Datos extraídos con éxito. Nuestros sistemas de ingeniería se han actualizado.", 5.0),
+                ("Tierra: Fabrica todo lo que puedas. Necesitaremos armas para lo que se avecina.", 5.5)
+            ])
+
+    def start_altech_squad_cinematic(self):
+        from cinematics import AltechSquadCinematic
+        from ursina import scene, destroy
+        
+        # Limpiar enemigos actuales del mapa
+        for e in list(scene.entities):
+            if type(e).__name__ == 'EnemyShip' and getattr(e, 'faction', None) != 'npc':
+                destroy(e)
+                
+        if not hasattr(self, 'altech_squad_cinematic'):
+            self.altech_squad_cinematic = AltechSquadCinematic(self.player, self)
+            
+        self.altech_squad_cinematic.play()
+        
+    def spawn_altech_wreck(self, position):
+        from ursina import Entity, color, Vec3
+        from enemy_ships import ENEMY_SHIPS
+        
+        self.mission_manager.altech_wreck_spawned = True
+        
+        config = ENEMY_SHIPS.get("nave-altech-enemy")
+        
+        # El modelo representativo para la chatarra hackeable (oscurecido)
+        self.altech_wreck = Entity(
+            model=config.model if config else 'cube',
+            color=color.rgba(40, 40, 40, 255),
+            scale=config.scale if config else (20, 10, 20),
+            position=position,
+            rotation=Vec3(15, 45, 10),
+            collider='box'
+        )
+        
+        # Forzar al mission manager a apuntar a la chatarra
+        tracked = self.mission_manager.get_tracked_mission()
+        if tracked and tracked.id == "main_03":
+            tracked.target_pos = self.altech_wreck.position
+            tracked.description = "Hackea los restos de la nave líder Altech."
+            tracked.short_description = "Acércate y pulsa X para hackear."
+            
+        if hasattr(self.player, 'ai_companion'):
+            self.player.ai_companion.trigger_dialogue([
+                ("IA: Amenaza neutralizada. Detecto un núcleo de datos intacto en los restos.", 4.5),
+                ("Tierra: Acércate a los restos de esa nave y hackéala. Necesitamos saber qué planean.", 5.5)
+            ])
+            
+    def hack_altech_wreck(self):
+        self.mission_manager.altech_wreck_hacked = True
+        if hasattr(self, 'altech_wreck') and self.altech_wreck:
+            from ursina import destroy
+            destroy(self.altech_wreck)
+            self.altech_wreck = None
+            
+        # Al hackear, completamos el objetivo de interceptar
+        self.mission_manager.complete_mission("main_03")
+        
+        # Esperamos a que terminen todo el lote 3
+        self.mission_manager.waiting_for_boss = True
+        
+        if hasattr(self.player, 'ai_companion'):
+            self.player.ai_companion.trigger_dialogue([
+                ("IA: Descargando base de datos táctica de Altech...", 4.0),
+                ("Tierra: Piloto, tengo las coordenadas de su Nave Nodriza principal.", 4.5),
+                ("Tierra: Termina tus tareas pendientes. Cuando estés listo, presiona [ 3 ] para ir a las coordenadas.", 6.5)
+            ])
+            
+    def start_boss_cinematic(self):
+        from cinematics import BossIntroCinematic
+        from ursina import scene, destroy
+        
+        if not hasattr(self, 'boss_cinematic'):
+            self.boss_cinematic = BossIntroCinematic(self.player, self)
+        
+        # Pausar spawn de IA y limitar al máximo a 10 naves activas
+        self.ai_director.boss_fight_active = True
+        self.ai_director.max_ships = 10
+        
+        # Reducir asteroides
+        if hasattr(self, 'environment'):
+            # Eliminamos un montón de asteroides para que no haya tantos (los limitamos a 40)
+            while len(self.environment.asteroids) > 40:
+                ast = self.environment.asteroids.pop()
+                destroy(ast)
+        
+        # Limpiar enemigos lejanos o todos para dar paso al jefe
+        for e in list(scene.entities):
+            if type(e).__name__ == 'EnemyShip':
+                destroy(e)
+                
+        self.boss_cinematic.play()
 
     def return_to_main_menu(self):
         self.intro_cinematic.stop_and_clear()

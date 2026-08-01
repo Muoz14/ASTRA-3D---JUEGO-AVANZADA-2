@@ -20,7 +20,7 @@ class Mission:
 
 class MissionUI(Entity):
     def __init__(self, manager, **kwargs):
-        super().__init__(parent=camera.ui, **kwargs)
+        super().__init__(parent=camera.ui, z=1, **kwargs)
         self.ignore_paused = True
         self.manager = manager
         
@@ -96,7 +96,7 @@ class WaypointArrow(Entity):
         self.distance_text = Text(parent=camera.ui, text="", scale=1.2, position=(0, 0.35), origin=(0,0), color=color.cyan)
         
         # Texto en la esquina inferior izquierda dinámico
-        self.secondary_text = Text(parent=camera.ui, text=" ", scale=0.9, position=(window.bottom_left.x + 0.03, -0.15), origin=(-0.5, 0), color=color.white)
+        self.secondary_text = Text(parent=camera.ui, text=" ", scale=0.9, position=(window.bottom_left.x + 0.03, -0.15), origin=(-0.5, 0), color=color.white, z=1)
         self.secondary_text.wordwrap = 40
         
         # Diamante 3D en el mundo para el objetivo de la misión principal
@@ -176,6 +176,7 @@ class MissionManager(Entity):
         super().__init__(**kwargs)
         self.player = player
         self.missions = []
+        self.current_batch = 1
         self.tracked_mission_id = None
         self.ui = MissionUI(self)
         self.waypoint = WaypointArrow(self, player)
@@ -185,6 +186,7 @@ class MissionManager(Entity):
 
     def reset(self):
         self.missions.clear()
+        self.current_batch = 1
         self.tracked_mission_id = None
         self.ui.update_ui()
 
@@ -241,14 +243,109 @@ class MissionManager(Entity):
                 if self.tracked_mission_id == id:
                     self.tracked_mission_id = None
                     
-                    # Intentar rastrear la siguiente misión principal disponible, o en su defecto cualquier otra
+                # Intentar rastrear la siguiente misión principal disponible, o en su defecto cualquier otra
                     for next_m in self.missions:
                         if not next_m.completed:
                             self.tracked_mission_id = next_m.id
                             break
                             
                 self.ui.update_ui()
+                
+                # Check if all missions in the current batch are completed
+                if all(miss.completed for miss in self.missions):
+                    invoke(self.advance_batch, delay=5.0)
+                    
                 return
+                
+    def advance_batch(self):
+        self.current_batch += 1
+        self.missions.clear()
+        self.tracked_mission_id = None
+        
+        if self.current_batch == 2:
+            self.player.survival_timer = 0.0
+            self.add_mission(
+                id="main_02",
+                title="Intercepta las Transmisiones",
+                description="Localiza la boya de comunicaciones enemiga para extraer datos sobre la corporación Altech.",
+                short_description="Escanea la boya de comunicaciones.",
+                target_pos=Vec3(2500, -500, -3500), # Un punto lejano para la boya
+                is_main=True
+            )
+            
+            # Crear la boya física en el mundo
+            if not hasattr(self, 'altech_buoy') or not self.altech_buoy:
+                self.altech_buoy = Entity(model='cube', color=color.cyan, scale=15, position=Vec3(2500, -500, -3500))
+                Entity(parent=self.altech_buoy, model='sphere', color=color.red, scale=1.2, y=1)
+                
+            self.add_mission(
+                id="sec_04",
+                title="Caza de Cazas",
+                description="Destruye 15 naves enemigas de Altech para mermar sus fuerzas.",
+                short_description="Destruye 15 naves enemigas.",
+                is_main=False,
+                max_progress=15
+            )
+            self.add_mission(
+                id="sec_05",
+                title="Ingeniería Inversa",
+                description="Fabrica 2 mejoras para tu nave en el menú de Inventario usando la tecnología recolectada.",
+                short_description="Fabrica 2 mejoras de nave.",
+                is_main=False,
+                max_progress=2
+            )
+            
+            # Chequeo retroactivo: si el jugador ya crafteó mejoras, sumarlas
+            upgrades_crafted = getattr(self.player, 'upgrades_crafted', 0)
+            if upgrades_crafted > 0:
+                self.set_mission_progress("sec_05", upgrades_crafted)
+                
+            self.add_mission(
+                id="sec_06",
+                title="Maniobras Evasivas",
+                description="Demuestra tu destreza. Sobrevive 3 minutos enteros sin morir.",
+                short_description="Sobrevive por 180 segundos.",
+                is_main=False,
+                max_progress=180
+            )
+            
+            if hasattr(self.player, 'ai_companion'):
+                self.player.ai_companion.trigger_dialogue([
+                    ("Tierra: Piloto, excelente trabajo con la anomalía.", 4.0),
+                    ("Tierra: Los datos sugieren tecnología de una facción humana clandestina...", 5.0),
+                    ("Tierra: Se llaman 'Altech'. Están usando tecnología alienígena robada.", 5.0),
+                    ("IA: Detecto una boya de transmisión de Altech cerca. Procedamos a interceptarla.", 5.5)
+                ])
+                
+        elif self.current_batch == 3:
+            self.add_mission(
+                id="main_03",
+                title="Escuadrón Altech",
+                description="Intercepta al escuadrón de reconocimiento Altech en las coordenadas indicadas.",
+                short_description="Intercepta escuadrón Altech.",
+                target_pos=Vec3(8000, 2000, -8000),
+                is_main=True
+            )
+            self.add_mission(
+                id="sec_07",
+                title="Depuración Total",
+                description="Destruye a 15 naves enemigas.",
+                short_description="Destruye 15 enemigos.",
+                is_main=False,
+                max_progress=15
+            )
+            
+            self.altech_squad_spawned = False
+            self.altech_wreck_spawned = False
+            self.altech_wreck_hacked = False
+            self.waiting_for_boss = False
+            self.altech_squad_kills = 0
+            
+            if hasattr(self.player, 'ai_companion'):
+                self.player.ai_companion.trigger_dialogue([
+                    ("IA: Nuevas coordenadas detectadas en la transmisión.", 3.5),
+                    ("Tierra: Piloto, dirígete a esas coordenadas. Creemos que es un escuadrón de reconocimiento.", 5.0)
+                ])
         
     def get_tracked_mission(self):
         if not getattr(self, 'tracked_mission_id', None): return None

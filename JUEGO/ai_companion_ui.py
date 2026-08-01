@@ -3,8 +3,8 @@ import textwrap
 
 class CompanionUI(Entity):
     def __init__(self, **kwargs):
-        # z=-20 asegura que el contenedor principal esté súper al frente de la cámara UI
-        super().__init__(parent=camera.ui, z=-20, **kwargs)
+        # z=1 asegura que el contenedor principal esté por detrás del inventario/mapa (-10)
+        super().__init__(parent=camera.ui, z=1, **kwargs)
         
         # Posición base en pantalla
         self.position = (0.55, 0.15)
@@ -14,7 +14,7 @@ class CompanionUI(Entity):
             parent=self, 
             model='quad',
             color=color.rgba(0.05, 0.08, 0.12, 0), 
-            scale=(0.36, 0.08), # Ancho fijo de 0.36
+            scale=(0.46, 0.08), # Ancho ampliado a 0.46
             position=(0, 0.045),
             origin=(0, 0.5), # Ancla arriba
             z=0 
@@ -26,7 +26,7 @@ class CompanionUI(Entity):
             model='quad', 
             color=color.rgba(0, 1, 1, 0), 
             scale=(0.006, 0.08), 
-            position=(-0.18, 0.045), 
+            position=(-0.23, 0.045), 
             origin=(0, 0.5),
             z=-1
         )
@@ -35,7 +35,7 @@ class CompanionUI(Entity):
         self.title = Text(
             parent=self,
             text='[ IA DE LA NAVE ]',
-            position=(-0.165, 0.033),
+            position=(-0.215, 0.033),
             scale=1.2, # Discreto pero destacado
             color=color.rgba(0, 1, 1, 0),
             z=-2 
@@ -45,7 +45,7 @@ class CompanionUI(Entity):
         self.dialogue_text = Text(
             parent=self,
             text=' ',
-            position=(-0.165, -0.005),
+            position=(-0.215, -0.005),
             scale=0.85, # Legible pero compacto
             color=color.rgba(1, 1, 1, 0),
             z=-2 
@@ -54,12 +54,14 @@ class CompanionUI(Entity):
         
         self.active_sequence = None
         
-    def show_message(self, message, duration=5.0):
+    def show_message(self, message, duration=5.0, title_text="[ IA DE LA NAVE ]"):
         if self.active_sequence:
             self.active_sequence.kill()
             
-        # 24 caracteres encajan perfectamente en el ancho 0.36 a escala 0.85
-        wrapped_message = "\n".join(textwrap.wrap(message, width=24))
+        self.title.text = title_text
+            
+        # 32 caracteres encajan perfectamente en el ancho 0.46 a escala 0.85
+        wrapped_message = "\n".join(textwrap.wrap(message, width=32))
         self.dialogue_text.text = wrapped_message
         
         # Ajuste dinámico de altura ESTRICTO
@@ -70,7 +72,7 @@ class CompanionUI(Entity):
         new_height = 0.06 + (line_count * 0.025)
         
         # Como bg tiene origin=(0, 0.5), al escalar en Y solo crece hacia abajo
-        self.bg.animate_scale((0.36, new_height), duration=0.2)
+        self.bg.animate_scale((0.46, new_height), duration=0.2)
         self.border.animate_scale((0.006, new_height), duration=0.2)
         
         # Animación de aparición

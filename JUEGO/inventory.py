@@ -109,6 +109,11 @@ class InventorySystem:
                 else:
                     player.vacuum_level = 1
                     
+            # Incrementar misión de ingeniería inversa
+            player.upgrades_crafted = getattr(player, 'upgrades_crafted', 0) + 1
+            if hasattr(player, 'mission_manager'):
+                player.mission_manager.increment_mission("sec_05")
+                    
             if getattr(player, 'achievements', None):
                 player.achievements.register_craft(recipe_name)
             return True

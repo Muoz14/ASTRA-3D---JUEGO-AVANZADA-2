@@ -84,6 +84,9 @@ class CompanionManager(Entity):
         player = self._get_player()
         is_cine = getattr(player, 'is_cinematic', False) if player else False
         
+        if getattr(self, '_in_story_dialogue', False):
+            return
+            
         if application.paused or is_cine:
             if not self._was_paused:
                 if self.audio_player:
@@ -254,6 +257,35 @@ class CompanionManager(Entity):
         self._trigger_event("boost")
         self.idle_timer = 0.0
         
+    def on_enemy_spotted(self):
+        self._trigger_event("enemy_spotted")
+        self.idle_timer = 0.0 # reset idle
+
+    def trigger_dialogue(self, dialogue_sequence):
+        # dialogue_sequence is a list of tuples: (text, duration)
+        from ursina import invoke
+        self._in_story_dialogue = True
+        self.ui.enabled = True
+        self._was_paused = False
+        
+        current_delay = 0.0
+        for text, duration in dialogue_sequence:
+            invoke(self._play_story_line, text, delay=current_delay)
+            current_delay += duration
+            
+        invoke(self._end_story_dialogue, delay=current_delay)
+        
+    def _play_story_line(self, text):
+        if self.audio_player:
+            self.audio_player.stop()
+        self.ui.show_message(text, title_text="[ COMUNICACIÓN ENTRANTE ]")
+        from menu import GameSettings
+        if getattr(GameSettings, 'ai_voice_enabled', True):
+            self.tts.speak(text)
+            
+    def _end_story_dialogue(self):
+        self._in_story_dialogue = False
+        self.ui.hide_message()      
     def on_weapon_overheated(self):
         self._trigger_event("overheat", ignore_cooldown=True)
         self.idle_timer = 0.0

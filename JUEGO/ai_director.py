@@ -8,6 +8,7 @@ class AIDirector(Entity):
         self.max_ships = 14
         self.spawn_timer = 0
         self.spawn_interval = 5.0 # Check every 5 seconds
+        self.boss_fight_active = False
         
         # Opciones de naves enemigas comunes
         self.altech_ship = "nave-altech-enemy"
@@ -22,6 +23,9 @@ class AIDirector(Entity):
         if not hasattr(self.game, 'player') or self.game.player is None:
             return
             
+        if self.boss_fight_active:
+            return # La Nave Nodriza se encarga de spawnear sus propios enemigos
+            
         # Aumentar gradualmente el límite de naves con el tiempo
         session_time = getattr(self.game.player, 'session_time', 0)
         current_limit = min(self.max_ships, 4 + int(session_time / 30) * 2)
@@ -32,11 +36,25 @@ class AIDirector(Entity):
             
             current_count = self.get_active_ships_count()
             
-            if current_count < current_limit:
-                squad_size = random.choice([1, 2, 4])
-                # Evitar pasarnos del límite
-                if current_count + squad_size <= self.max_ships:
-                    self.spawn_squad(squad_size)
+            # Lógica especial para el Escuadrón Altech (Lote 3)
+            mm = getattr(self.game.player, 'mission_manager', None)
+            is_altech_battle = mm and getattr(mm, 'current_batch', 0) == 3 and getattr(mm, 'altech_squad_spawned', False) and not getattr(mm, 'altech_wreck_spawned', False)
+            
+            if is_altech_battle:
+                # Si es la batalla Altech, solo spawneamos refuerzos si quedan 2 o menos (el líder y otro más)
+                if current_count <= 2:
+                    spawned_so_far = getattr(mm, 'altech_total_spawned', 8)
+                    if spawned_so_far < 45:
+                        squad_size = min(6, 45 - spawned_so_far)
+                        mm.altech_total_spawned = spawned_so_far + squad_size
+                        self.spawn_squad(squad_size)
+            else:
+                # Comportamiento normal
+                if current_count < current_limit:
+                    squad_size = random.choice([1, 2, 4])
+                    # Evitar pasarnos del límite
+                    if current_count + squad_size <= self.max_ships:
+                        self.spawn_squad(squad_size)
                 
     def spawn_squad(self, squad_size=4):
         # Elegir facción
@@ -44,15 +62,18 @@ class AIDirector(Entity):
         
         squadron_id = str(uuid.uuid4())
         
-        # Posición de spawn (dentro de los límites del sector del jugador, pero variando entre cerca y lejos)
-        # Ajustado para que no spawneen tan ridículamente lejos (evita puntos rojos extraños a la distancia)
-        dist = random.uniform(500, 2500)
+        # Posición base por defecto
+        base_pos = self.game.player.position
         
-        # Aleatorio alrededor del jugador, o a veces alrededor del planeta
-        if random.random() < 0.3 and hasattr(self.game, 'fractured_planet') and self.game.fractured_planet:
+        # Override para el Lote 3: Batalla del Escuadrón Altech
+        mm = getattr(self.game.player, 'mission_manager', None)
+        if mm and getattr(mm, 'current_batch', 0) == 3 and getattr(mm, 'altech_squad_spawned', False) and not getattr(mm, 'waiting_for_boss', False):
+            ship_type = self.altech_ship
+            base_pos = Vec3(8000, 2000, -8000) # Centro de la batalla
+        elif random.random() < 0.3 and hasattr(self.game, 'fractured_planet') and self.game.fractured_planet:
             base_pos = self.game.fractured_planet.position
-        else:
-            base_pos = self.game.player.position
+            
+        dist = random.uniform(500, 2500)
             
         # Generar punto aleatorio en esfera
         dir_vec = Vec3(random.uniform(-1, 1), random.uniform(-1, 1), random.uniform(-1, 1)).normalized()
