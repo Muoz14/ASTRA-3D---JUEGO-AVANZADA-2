@@ -15,16 +15,22 @@ class TTSManager:
         # text_key es el texto original (o con sufijo "_glitch")
         file_hash = hashlib.md5(text_key.encode('utf-8')).hexdigest()
         
-        # Primero buscar en history_audio (historia), luego en ai_audio (charlas genéricas)
-        history_path = os.path.join(os.path.dirname(__file__), "assets", "history_audio", f"{file_hash}.mp3")
-        ai_path = os.path.join(self.assets_dir, f"{file_hash}.mp3")
+        # Buscar primero .mp3 y luego .wav
+        history_path_mp3 = os.path.join(os.path.dirname(__file__), "assets", "history_audio", f"{file_hash}.mp3")
+        ai_path_mp3 = os.path.join(self.assets_dir, f"{file_hash}.mp3")
+        history_path_wav = os.path.join(os.path.dirname(__file__), "assets", "history_audio", f"{file_hash}.wav")
+        ai_path_wav = os.path.join(self.assets_dir, f"{file_hash}.wav")
         
-        if os.path.exists(history_path):
-            self.audio_ready = history_path
-        elif os.path.exists(ai_path):
-            self.audio_ready = ai_path
+        if os.path.exists(history_path_mp3):
+            self.audio_ready = history_path_mp3
+        elif os.path.exists(history_path_wav):
+            self.audio_ready = history_path_wav
+        elif os.path.exists(ai_path_mp3):
+            self.audio_ready = ai_path_mp3
+        elif os.path.exists(ai_path_wav):
+            self.audio_ready = ai_path_wav
         else:
-            print(f"Advertencia: No se encontró audio pregenerado para: {file_hash}.mp3")
+            print(f"Advertencia: No se encontró audio pregenerado para: {file_hash}")
             self.audio_ready = None
 
     def stop(self):

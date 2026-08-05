@@ -42,9 +42,12 @@ class MaterialPopup(Entity):
         Entity(parent=self.bg, model='quad', color=color.cyan, scale=(0.02, 1), position=(-0.5, 0), z=-0.01)
         Entity(parent=self.bg, model='quad', color=color.cyan, scale=(0.2, 0.05), position=(0.4, 0.475), z=-0.01)
 
+        mat_name = getattr(self.target, 'material_name', 'DESCONOCIDO')
+        mat_desc = getattr(self.target, 'material_desc', 'Sin clasificar')
+        
         Text(parent=self, text='[ ANALISIS MINERAL ]', position=(0.02, -0.02), scale=1.2, color=color.cyan, z=-1)
-        Text(parent=self, text=self.target.material_name, position=(0.02, -0.06), scale=1.8, color=color.white, z=-1)
-        Text(parent=self, text=f"Tipo: {self.target.material_desc}", position=(0.02, -0.11), scale=1.1,
+        Text(parent=self, text=mat_desc, position=(0.02, -0.06), scale=1.5, color=color.white, z=-1)
+        Text(parent=self, text=f"Tipo: {mat_name}", position=(0.02, -0.11), scale=1.1,
              color=color.light_gray, z=-1)
 
         self.dist_text = Text(parent=self, text='0m', position=(0.32, -0.02), scale=1.2, color=color.orange, z=-1)
@@ -88,7 +91,7 @@ class TacticalScanner:
     def __init__(self, player):
         self.player = player
         self.active = False
-        self.scan_radius = 500
+        self.scan_radius = 1500
         self.max_targets = 15
         self.markers = []
         self.active_timer = 0
@@ -161,7 +164,8 @@ class TacticalScanner:
             Entity(parent=marker, model='quad', scale=(0.05, 2.0), position=(1.0, 0, 0), color=c, unlit=True)
             Entity(parent=marker, model='quad', scale=(0.05, 2.0), position=(-1.0, 0, 0), color=c, unlit=True)
 
-            marker.text_dist = Text(parent=marker, text=f'{int(dist)}m', position=(0, -1.8, 0), origin=(0, 0), scale=9,
+            mat_name = getattr(entity, 'material_name', 'ASTEROIDE')
+            marker.text_dist = Text(parent=marker, text=f'{mat_name}\n{int(dist)}m', position=(0, -1.8, 0), origin=(0, 0), scale=9,
                                     color=color.cyan)
             self.markers.append(marker)
 
@@ -517,6 +521,14 @@ class PlayerShip(Entity):
         self.thruster_color = getattr(config, 'thruster_color', color.rgba(0, 255, 255, 200))
         self.laser_level = 1
         self.vacuum_level = 0
+        
+        # Aplicar las posiciones de cámara específicas de la nave
+        self.camera_modes = getattr(config, 'camera_modes', [(0, 1.0, -9), (0, 1.5, -14), (0, 2.5, -20)])
+        # Si la cámara actual es mayor a las disponibles (por si acaso), reajustar
+        if hasattr(self, 'current_cam_index'):
+            if self.current_cam_index >= len(self.camera_modes):
+                self.current_cam_index = len(self.camera_modes) - 1
+            camera.position = self.camera_modes[self.current_cam_index]
 
         self.target_speed = 0
         self.current_speed = 0
@@ -1007,8 +1019,12 @@ class PlayerShip(Entity):
                 return
             if hasattr(ent, 'is_asteroid'):
                 from weapons import ExplosionParticle
+                pool = getattr(self.game_app, 'pool', None) if hasattr(self, 'game_app') else None
                 for _ in range(25):
-                    ExplosionParticle(pos=ent.position)
+                    if pool:
+                        pool.get_object(ExplosionParticle, pos=ent.position, pool=pool)
+                    else:
+                        ExplosionParticle(pos=ent.position)
 
                 rebound_dir = (self.position - ent.position).normalized()
                 self.position += rebound_dir * 1.5
@@ -1289,11 +1305,11 @@ class PlayerShip(Entity):
                 pool.get_object(DualLaser, self.position, true_aim_rotation, self.forward, self.right, self.up,
                                 offset_x=self.right_laser_offset[0] * scale_x, offset_y=self.right_laser_offset[1] * scale_y,
                                 offset_z=self.right_laser_offset[2] * scale_z, damage_level=laser_dmg, owner=self,
-                                laser_scale=self.laser_scale, target=getattr(self, 'locked_target', None))
+                                laser_scale=self.laser_scale, target=getattr(self, 'locked_target', None), pool=pool)
                 pool.get_object(DualLaser, self.position, true_aim_rotation, self.forward, self.right, self.up,
                                 offset_x=self.left_laser_offset[0] * scale_x, offset_y=self.left_laser_offset[1] * scale_y,
                                 offset_z=self.left_laser_offset[2] * scale_z, damage_level=laser_dmg, owner=self,
-                                laser_scale=self.laser_scale, target=getattr(self, 'locked_target', None))
+                                laser_scale=self.laser_scale, target=getattr(self, 'locked_target', None), pool=pool)
             else:
                 config = AVAILABLE_SHIPS.get(self.ship_id, AVAILABLE_SHIPS["nave1"])
                 scale_x, scale_y, scale_z = config.scale

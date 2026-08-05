@@ -558,24 +558,19 @@ class PatrolAction(Action):
         
         # Generar nuevo waypoint si no hay
         if not target_waypoint:
-            # Usar la posición del jugador como origen para no alejarse
-            player = getattr(entity, 'player', None)
-            if player and not getattr(player, 'is_dead', False):
-                origin = player.world_position
-            else:
-                origin = blackboard.get("spawn_point", entity.position)
+            # Usar su punto de aparición como origen de patrullaje para no seguir mágicamente al jugador
+            origin = blackboard.get("spawn_point", entity.position)
             
             offset = Vec3(random.uniform(-self.patrol_radius, self.patrol_radius),
                           random.uniform(-self.patrol_radius, self.patrol_radius),
                           random.uniform(-self.patrol_radius, self.patrol_radius))
             target_waypoint = origin + offset
             
-            # Asegurar que el waypoint no quede a más de 900m del jugador
-            if player:
-                dist_check = distance(target_waypoint, player.world_position)
-                if dist_check > 900:
-                    pull_dir = (target_waypoint - player.world_position).normalized()
-                    target_waypoint = player.world_position + pull_dir * random.uniform(300, 700)
+            # Asegurar que el waypoint no quede a más de su radio de patrullaje real
+            dist_check = distance(target_waypoint, origin)
+            if dist_check > self.patrol_radius * 1.5:
+                pull_dir = (target_waypoint - origin).normalized()
+                target_waypoint = origin + pull_dir * random.uniform(100, self.patrol_radius)
             
             blackboard.set("patrol_waypoint", target_waypoint)
             

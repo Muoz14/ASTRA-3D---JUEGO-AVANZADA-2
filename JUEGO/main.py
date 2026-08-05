@@ -1,3 +1,7 @@
+from panda3d.core import loadPrcFileData
+# Forzar el uso de la tarjeta gráfica dedicada (NVIDIA/AMD) en vez de la integrada
+loadPrcFileData('', 'prefer-discrete-gpu #t')
+
 from ursina import *
 from player import PlayerShip
 from environment import AsteroidManager, CosmicBackground, SpaceDustManager
@@ -173,45 +177,35 @@ class GlobalInputController(Entity):
     def input(self, key):
         from ships import AVAILABLE_SHIPS
         
-        # Atajos de desarrollador para probar la IA Enemiga
-        if key == 'f5':
-            if hasattr(self.game, 'player') and self.game.player and not self.game.player.is_dead:
-                from enemy import EnemyShip
-                import time
-                sq_id = f"squad_{time.time()}"
-                
-                # Líder
-                spawn_pos = self.game.player.position + self.game.player.forward * 100
-                EnemyShip("nave-alien-enemy", spawn_pos, self.game, is_boss=False, is_leader=True, squadron_id=sq_id)
-                # Escoltas
-                EnemyShip("nave-alien-enemy", spawn_pos + self.game.player.right * 15 - self.game.player.forward * 15, self.game, is_boss=False, is_wingman=True, squadron_id=sq_id)
-                EnemyShip("nave-alien-enemy", spawn_pos - self.game.player.right * 15 - self.game.player.forward * 15, self.game, is_boss=False, is_wingman=True, squadron_id=sq_id)
-                print(f"Spawneado escuadrón Alien: {sq_id}")
-        elif key == 'f6':
-            if hasattr(self.game, 'player') and self.game.player and not self.game.player.is_dead:
-                from enemy import EnemyShip
-                import time
-                sq_id = f"squad_{time.time()}"
-                
-                # Líder
-                spawn_pos = self.game.player.position + self.game.player.forward * 100
-                EnemyShip("nave-altech-enemy", spawn_pos, self.game, is_boss=False, is_leader=True, squadron_id=sq_id)
-                # Escoltas
-                EnemyShip("nave-altech-enemy", spawn_pos + self.game.player.right * 15 - self.game.player.forward * 15, self.game, is_boss=False, is_wingman=True, squadron_id=sq_id)
-                EnemyShip("nave-altech-enemy", spawn_pos - self.game.player.right * 15 - self.game.player.forward * 15, self.game, is_boss=False, is_wingman=True, squadron_id=sq_id)
-                print(f"Spawneado escuadrón Altech: {sq_id}")
-        elif key == 'f7':
-            if hasattr(self.game, 'player') and self.game.player and not self.game.player.is_dead:
-                from enemy import EnemyShip
-                spawn_pos = self.game.player.position + self.game.player.forward * 250
-                EnemyShip("boss1-nodriza", spawn_pos, self.game, is_boss=True)
-                print("Spawneado: boss1-nodriza")
-        elif key == 'f8':
-            if hasattr(self.game, 'player') and self.game.player and not self.game.player.is_dead:
-                from enemy import EnemyShip
-                spawn_pos = self.game.player.position + self.game.player.forward * 150
-                EnemyShip("nave-exploradora", spawn_pos, self.game, is_npc=True)
-                print("Spawneado: nave-exploradora (NPC)")
+        # Atajos de desarrollador para probar la IA Enemiga (DESACTIVADOS)
+        # if key == 'f5':
+        #     if hasattr(self.game, 'player') and self.game.player and not self.game.player.is_dead:
+        #         from enemy import EnemyShip
+        #         import time
+        #         sq_id = f"squad_{time.time()}"
+        #         spawn_pos = self.game.player.position + self.game.player.forward * 100
+        #         EnemyShip("nave-alien-enemy", spawn_pos, self.game, is_boss=False, is_leader=True, squadron_id=sq_id)
+        #         EnemyShip("nave-alien-enemy", spawn_pos + self.game.player.right * 15 - self.game.player.forward * 15, self.game, is_boss=False, is_wingman=True, squadron_id=sq_id)
+        #         EnemyShip("nave-alien-enemy", spawn_pos - self.game.player.right * 15 - self.game.player.forward * 15, self.game, is_boss=False, is_wingman=True, squadron_id=sq_id)
+        # elif key == 'f6':
+        #     if hasattr(self.game, 'player') and self.game.player and not self.game.player.is_dead:
+        #         from enemy import EnemyShip
+        #         import time
+        #         sq_id = f"squad_{time.time()}"
+        #         spawn_pos = self.game.player.position + self.game.player.forward * 100
+        #         EnemyShip("nave-altech-enemy", spawn_pos, self.game, is_boss=False, is_leader=True, squadron_id=sq_id)
+        #         EnemyShip("nave-altech-enemy", spawn_pos + self.game.player.right * 15 - self.game.player.forward * 15, self.game, is_boss=False, is_wingman=True, squadron_id=sq_id)
+        #         EnemyShip("nave-altech-enemy", spawn_pos - self.game.player.right * 15 - self.game.player.forward * 15, self.game, is_boss=False, is_wingman=True, squadron_id=sq_id)
+        # elif key == 'f7':
+        #     if hasattr(self.game, 'player') and self.game.player and not self.game.player.is_dead:
+        #         from enemy import EnemyShip
+        #         spawn_pos = self.game.player.position + self.game.player.forward * 250
+        #         EnemyShip("boss1-nodriza", spawn_pos, self.game, is_boss=True)
+        # elif key == 'f8':
+        #     if hasattr(self.game, 'player') and self.game.player and not self.game.player.is_dead:
+        #         from enemy import EnemyShip
+        #         spawn_pos = self.game.player.position + self.game.player.forward * 150
+        #         EnemyShip("nave-exploradora", spawn_pos, self.game, is_npc=True)
         
         # Solo registrar teclas si el alien no está desbloqueado
         if "nave-alien-enemy" not in AVAILABLE_SHIPS:
@@ -236,6 +230,18 @@ class GlobalInputController(Entity):
         
         if key == 'f11':
             window.fullscreen = not window.fullscreen
+            if window.fullscreen:
+                from menu import GameSettings
+                res = GameSettings.resolutions[GameSettings.current_res_idx]
+                window.size = res
+            else:
+                try:
+                    import ctypes
+                    hwnd = ctypes.windll.user32.FindWindowW(None, "Astra 3D")
+                    if hwnd:
+                        ctypes.windll.user32.ShowWindow(hwnd, 3)
+                except:
+                    pass
             
         if key == 'f12':
             if hasattr(self.game, 'ship_tuner'):
@@ -329,23 +335,79 @@ class GameOverMenu(Entity):
             self.msg2.text = t2
 
 
+class Preloader(Entity):
+    def __init__(self, game_app, **kwargs):
+        super().__init__(parent=camera.ui, z=-100, **kwargs)
+        self.game_app = game_app
+        self.bg = Entity(parent=self, model='quad', color=color.black, scale=(99, 99), z=1)
+        self.text = Text(parent=self, text="CARGANDO SISTEMAS...", scale=2.5, origin=(0, 0), position=(0, 0), color=color.cyan, z=0)
+        
+        from ships import AVAILABLE_SHIPS
+        try:
+            from enemy_ships import ENEMY_SHIPS
+        except:
+            ENEMY_SHIPS = {}
+            
+        self.models_to_load = []
+        for s in AVAILABLE_SHIPS.values():
+            if hasattr(s, 'model'): self.models_to_load.append(s.model)
+        for s in ENEMY_SHIPS.values():
+            if hasattr(s, 'model'): self.models_to_load.append(s.model)
+            
+        self.models_to_load.append('assets/nave_nodriza_2/scene.gltf')
+        self.models_to_load.append('assets/planeta/kepler_10_b.glb')
+        
+        self.models_to_load = list(set(self.models_to_load))
+        self.idx = 0
+        self.frames = 0
+
+    def update(self):
+        self.frames += 1
+        if self.frames < 2: return
+        
+        if self.idx < len(self.models_to_load):
+            try:
+                load_model(self.models_to_load[self.idx])
+            except Exception as e:
+                pass
+            self.idx += 1
+        else:
+            self.game_app.delayed_init()
+            destroy(self)
+
+
 class GameApp:
     def __init__(self):
         # vsync=False quita el límite de FPS y development_mode=False optimiza el rendimiento interno
         self.app = Ursina(development_mode=False, vsync=False)
         
         GameSettings.load()
-        res = GameSettings.resolutions[GameSettings.current_res_idx]
-        window.size = res
+        
+        window.borderless = False
+        window.fullscreen = False
+        window.title = "Astra 3D"
+        
+        try:
+            import ctypes
+            hwnd = ctypes.windll.user32.FindWindowW(None, "Astra 3D")
+            if not hwnd:
+                hwnd = ctypes.windll.user32.GetForegroundWindow()
+            if hwnd:
+                ctypes.windll.user32.ShowWindow(hwnd, 3)
+        except:
+            pass
+            
         window.vsync = GameSettings.vsync
         
-        window.center_on_screen()
         window.color = color.black
-        window.title = "Astra 3D"
         window.exit_button.visible = False
 
         # Plano de renderizado seguro para evitar el quiebre de profundidad
         camera.clip_plane_far = 10000
+        
+        self.preloader = Preloader(self)
+
+    def delayed_init(self):
         self.sky = Sky(color=color.black)
 
         self.game_over_menu = GameOverMenu(restart_func=self.restart_game, menu_func=self.return_to_main_menu, change_pilot_func=self.change_pilot)
@@ -370,7 +432,7 @@ class GameApp:
         from pool_manager import ObjectPool
         self.pool = ObjectPool()
         
-        self.environment = AsteroidManager(player=self.player, count=90, radius=1000, pool=self.pool)
+        self.environment = AsteroidManager(player=self.player, count=80, radius=1600, pool=self.pool)
         self.space_dust = SpaceDustManager(player=self.player, count=100, radius=80)
         self.intro_cinematic = IntroCinematic(self.player)
         
@@ -745,19 +807,31 @@ class GameApp:
         application.paused = False
             
     def unlock_alien_ship(self):
-        from ships import AVAILABLE_SHIPS
+        from ships import AVAILABLE_SHIPS, ShipConfig, DummyConfig
         if "nave-alien-enemy" not in AVAILABLE_SHIPS:
             try:
                 from enemy_ships import ENEMY_SHIPS
+                AVAILABLE_SHIPS["nave-altech-enemy"] = ENEMY_SHIPS["nave-altech-enemy"]
                 AVAILABLE_SHIPS["nave-alien-enemy"] = ENEMY_SHIPS["nave-alien-enemy"]
+                # Añadir la nave exploradora
+                AVAILABLE_SHIPS["nave-exploradora"] = ShipConfig(
+                    id="nave-exploradora", name="Nave Exploradora Neutral", model='assets/nave_exploradora/nave-npc_neutral.glb',
+                    scale=(3.0, 3.0, 3.0), menu_scale=(3.0, 3.0, 3.0), ship_color=color.white, max_speed=60, boost_max_speed=140,
+                    acceleration=1.5, friction=0.8, laser_offsets=((-0.00, -0.20, -1.25), (0.00, -0.20, -1.25)),
+                    thruster_offsets=[(-0.2667, 0.0333, -0.7333), (0.2667, 0.0333, -0.7333)], thruster_scale=(0.38, 0.38, 0.37),
+                    model_rotation_offset=(0.0, 90.0, 0.0), description="Nave secreta desbloqueada. Excelente para recolección.",
+                    max_health=100, laser_scale=(0.2, 0.2, 2.0), thruster_color=color.orange, collider_size=(7, 3, 10),
+                    dummy_config=DummyConfig(scale_normal=(1.0, 1.0, 1.0), scale_large=(2.0, 2.0, 2.0))
+                )
+                
                 # Actualizar el menú si está inicializado
                 if hasattr(self, 'main_menu') and hasattr(self.main_menu, 'ship_menu'):
                     self.main_menu.ship_menu.ship_keys = list(AVAILABLE_SHIPS.keys())
                     self.main_menu.ship_menu.update_ui()
                     
                 # Notificación visual y sonido
-                t = Text(parent=camera.ui, text="<cyan>¡CAZA ALIENÍGENA DESBLOQUEADO!", position=(0, 0.4), origin=(0, 0), scale=2.5, z=-10)
-                destroy(t, delay=3)
+                t = Text(parent=camera.ui, text="<cyan>¡NAVES SECRETAS DESBLOQUEADAS!", position=(0, 0.4), origin=(0, 0), scale=2.5, z=-10)
+                destroy(t, delay=4)
             except ImportError:
                 pass
 

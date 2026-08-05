@@ -9,6 +9,14 @@ MATERIALES = {
     "URANIO (U)": {"desc": "Núcleo combustible altamente energético."}
 }
 
+MINERAL_IMAGES = {
+    "HIERRO (Fe)": "assets/minerals/hierro.png",
+    "COBRE (Cu)": "assets/minerals/cobre.png",
+    "TITANIO (Ti)": "assets/minerals/titanio.png",
+    "ORO (Au)": "assets/minerals/oro.png",
+    "URANIO (U)": "assets/minerals/uranio.png",
+}
+
 # Definición global de recetas y mejoras adaptadas a tus variables
 RECETAS = {
     "Láser de Fuego Rápido": {
@@ -311,8 +319,14 @@ class InventoryUI(Entity):
             
             if nombre_completo == "Kit de Reparación":
                 self.detail_symbol_text.text = ''
+                self.detail_symbol_icon.texture = 'assets/wrench_icon.png'
                 self.detail_symbol_icon.enabled = True
                 self.detail_symbol_icon.color = color.hex('#FFD700')
+            elif nombre_completo in MINERAL_IMAGES:
+                self.detail_symbol_text.text = ''
+                self.detail_symbol_icon.texture = MINERAL_IMAGES[nombre_completo]
+                self.detail_symbol_icon.enabled = True
+                self.detail_symbol_icon.color = color.white
             else:
                 self.detail_symbol_text.text = simbolo
                 self.detail_symbol_icon.enabled = False
@@ -416,9 +430,15 @@ class InventoryUI(Entity):
                 
                 if mat_name == "Kit de Reparación":
                     slot.item_text.text = ''
+                    slot.item_icon.texture = 'assets/wrench_icon.png'
                     slot.item_icon.enabled = True
                     slot.item_icon.color = color.hex('#FFD700')
                     col = color.hex('#FFD700')
+                elif mat_name in MINERAL_IMAGES:
+                    slot.item_text.text = ''
+                    slot.item_icon.texture = MINERAL_IMAGES[mat_name]
+                    slot.item_icon.enabled = True
+                    slot.item_icon.color = color.white
                 else:
                     slot.item_text.text = simbolo
                     slot.item_icon.enabled = False

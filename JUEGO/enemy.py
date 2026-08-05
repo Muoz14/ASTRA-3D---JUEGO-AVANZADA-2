@@ -52,12 +52,17 @@ class EnemyShip(Entity):
         self.target_speed = 0
         self.current_speed = 0
         
-        self.fire_rate = 0.6 # Dispara cada 0.6 segundos (ajustable)
+        self.fire_rate = 0.35 # Dispara cada 0.35 segundos (más agresivo)
         self.fire_cooldown = 0
         
-        # Nuevas mecánicas tácticas
         self.max_heat = 100.0
         self.heat = 0.0
+        
+        # Throttling IA: 15 FPS para lógica pesada en lugar de 60 FPS
+        self.ai_timer = random.uniform(0, 0.1)
+        self.ai_interval = 1.0 / 15.0
+        
+        self.player = None
         self.max_boost_fuel = 100.0
         self.boost_fuel = 100.0
         
@@ -97,7 +102,7 @@ class EnemyShip(Entity):
             if self.is_minion or force_detection or is_altech_battle:
                 self.bt = build_basic_fighter_tree(detection_radius=15000) # Nunca nos pierde de vista
             else:
-                self.bt = build_basic_fighter_tree(detection_radius=800) # Detectan al jugador al spawnear o acercarse
+                self.bt = build_basic_fighter_tree(detection_radius=250) # Detectan al jugador solo a 250m de distancia
             
         # Para evitar un "instakill volley" masivo tras la cinemática, retrasamos el primer disparo
         if force_detection:
@@ -146,13 +151,13 @@ class EnemyShip(Entity):
             from ursina import Entity, Vec3
             dummy = Entity(position=self.position)
             
-            # Error aleatorio para que se pueda esquivar con dash (ráfagas imprecisas)
-            err_range = 6.0
+            # Error aleatorio mínimo (Casi AimBot) para obligar al jugador a usar dashes
+            err_range = 1.0 # Reducido de 2.5 a 1.0
             
-            # Reducir error para la nodriza según su salud (de 6.0 baja a 1.5)
+            # La nodriza ahora tiene precisión perfecta a medida que pierde salud
             if getattr(self, 'is_boss', False):
                 health_percent = getattr(self, 'health', 1) / max(getattr(self, 'max_health', 1), 1)
-                err_range = 1.5 + (4.5 * health_percent)
+                err_range = 0.8 * health_percent # De 0.8 baja a 0.0
                 
             error_offset = Vec3(random.uniform(-err_range, err_range), random.uniform(-err_range, err_range), random.uniform(-err_range, err_range))
             
@@ -164,18 +169,36 @@ class EnemyShip(Entity):
         if hasattr(self, 'game') and hasattr(self.game, 'audio_manager'):
             self.game.audio_manager.play_enemy_laser()
 
+        pool = getattr(self.game, 'pool', None) if hasattr(self, 'game') else None
+        
         # Utiliza DualLaser de weapons.py
         for offset in self.config.laser_offsets:
-            DualLaser(self.position, aim_rot, self.forward, self.right, self.up,
-                      offset_x=offset[0] * self.config.scale[0], 
-                      offset_y=offset[1] * self.config.scale[1],
-                      offset_z=offset[2] * self.config.scale[2], 
-                      damage_level=12, owner=self, 
-                      laser_scale=(0.2, 0.2, 2.0), laser_color=self.config.laser_color)
+            if pool:
+                pool.get_object(DualLaser, self.position, aim_rot, self.forward, self.right, self.up,
+                          offset_x=offset[0] * self.config.scale[0], 
+                          offset_y=offset[1] * self.config.scale[1],
+                          offset_z=offset[2] * self.config.scale[2], 
+                          damage_level=12, owner=self, 
+                          laser_scale=(0.2, 0.2, 2.0), laser_color=self.config.laser_color, pool=pool)
+            else:
+                DualLaser(self.position, aim_rot, self.forward, self.right, self.up,
+                          offset_x=offset[0] * self.config.scale[0], 
+                          offset_y=offset[1] * self.config.scale[1],
+                          offset_z=offset[2] * self.config.scale[2], 
+                          damage_level=12, owner=self, 
+                          laser_scale=(0.2, 0.2, 2.0), laser_color=self.config.laser_color)
                       
     def spawn_minions(self, minion_id, count):
+        from ursina import scene
+        current_minions = sum(1 for e in scene.entities if type(e).__name__ == 'EnemyShip' and getattr(e, 'is_boss', False) == False)
+        
+        if current_minions >= 14:
+            return
+            
+        allowed_count = min(count, 14 - current_minions)
+        
         # Spawnea secuencialmente naves desde su "helipuerto" (centro / abajo)
-        for i in range(count):
+        for i in range(allowed_count):
             spawn_pos = self.world_position + self.down * 5 * self.config.scale[1] + self.right * random.uniform(-10, 10)
             # Invoke el constructor de la nave, asegurando que se añade al juego
             minion = EnemyShip(minion_id, spawn_pos, self.game, is_boss=False, is_minion=True)
@@ -192,6 +215,13 @@ class EnemyShip(Entity):
         # Flash rojo al recibir daño
         self.visual.color = color.red
         invoke(setattr, self.visual, 'color', color.white, delay=0.1)
+        
+        # Si reciben daño, te detectan a ti y avisan a todas las naves aliadas cercanas
+        self.has_detected_player = True
+        for e in EnemyShip.active_ships:
+            if e != self and not getattr(e, 'is_dead', False) and getattr(e, 'faction', 'unknown') == getattr(self, 'faction', 'unknown'):
+                if distance(self.position, e.position) <= 500: # Rango ajustado a 500m
+                    e.has_detected_player = True
         
         if self.health <= 0:
             self.explode()
@@ -266,43 +296,44 @@ class EnemyShip(Entity):
         if getattr(self, 'is_dead', False):
             return
             
-        # Despawn automático si se alejan demasiado (para ahorrar memoria y reciclar spawns)
-        if hasattr(self, 'game') and hasattr(self.game, 'player') and self.game.player:
-            dist = (self.world_position - self.game.player.world_position).length()
+        self.ai_timer += time.dt
+        if self.ai_timer >= self.ai_interval:
+            self.ai_timer = 0.0
             
-            # Limite de despawn: enemigos a más de 1100m se destruyen, pero el jefe tiene mucho más rango
-            despawn_limit = self.game.player.sector_radius if self.is_npc else 1100
-            if getattr(self, 'is_boss', False):
-                despawn_limit = 4000
+            # Despawn automático si se alejan demasiado
+            if hasattr(self, 'game') and hasattr(self.game, 'player') and self.game.player:
+                dist = (self.world_position - self.game.player.world_position).length()
                 
-            if dist > despawn_limit:
-                # Proteger naves que son críticas para una misión
-                is_mission_critical = False
+                # Limite de despawn
+                despawn_limit = self.game.player.sector_radius if self.is_npc else 1100
                 if getattr(self, 'is_boss', False):
-                    is_mission_critical = True
-                            
-                if not is_mission_critical:
-                    # Despawn silencioso: NO llama a explode(), así que NO cuenta para misiones
-                    # Pedir al Director que reponga esta nave inmediatamente
-                    if hasattr(self.game, 'ai_director') and self.game.ai_director.enabled:
-                        from ursina import invoke
-                        invoke(self.game.ai_director.spawn_squad, 1, delay=0.5)
-                    destroy(self)
-                    return
+                    despawn_limit = 4000
+                    
+                if dist > despawn_limit:
+                    is_mission_critical = False
+                    if getattr(self, 'is_boss', False):
+                        is_mission_critical = True
+                                
+                    if not is_mission_critical:
+                        if hasattr(self.game, 'ai_director') and self.game.ai_director.enabled:
+                            from ursina import invoke
+                            invoke(self.game.ai_director.spawn_squad, 1, delay=0.5)
+                        destroy(self)
+                        return
 
-        # Tick del Behavior Tree
-        if hasattr(self.game, 'player') and self.game.player:
-            self.player = self.game.player
-        else:
-            self.player = None
-            
-        self.bt.tick(self, self.blackboard)
-        if getattr(self, 'is_dead', False):
-            return
-            
+            # Tick del Behavior Tree a 15 FPS
+            if hasattr(self.game, 'player') and getattr(self.game, 'player', None):
+                self.player = self.game.player
+            else:
+                self.player = None
+                
+            self.bt.tick(self, self.blackboard)
+            if getattr(self, 'is_dead', False):
+                return
+                
         # CONGELAR IA DURANTE CINEMÁTICAS
         # Si el jugador está viendo una cinemática, los enemigos reales no deben moverse ni atacar
-        if self.player and getattr(self.player, 'is_cinematic', False):
+        if getattr(self, 'player', None) and getattr(self.player, 'is_cinematic', False):
             self.target_speed = lerp(self.current_speed, 0, time.dt * 2)
             self.current_speed = lerp(self.current_speed, 0, time.dt * 2)
             return

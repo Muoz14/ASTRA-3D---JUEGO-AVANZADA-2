@@ -372,9 +372,10 @@ class MissionManager(Entity):
             if hasattr(self.player, 'ai_companion'):
                 self.player.ai_companion.trigger_dialogue([
                     ("Tierra: Piloto, excelente trabajo con la anomalía.", 4.0),
-                    ("Tierra: Los datos sugieren tecnología de una facción humana clandestina...", 5.0),
-                    ("Tierra: Se llaman 'Altech'. Están usando tecnología alienígena robada.", 5.0),
-                    ("IA: Detecto una boya de transmisión de Altech cerca. Procedamos a interceptarla.", 5.5)
+                    ("Tierra: Los datos extraídos apuntan a una organización llamada 'Altech'.", 5.0),
+                    ("IA: Sus frecuencias no coinciden con ninguna base de datos conocida, Comando.", 5.0),
+                    ("Tierra: Aún desconocemos quiénes son o su verdadero propósito. Mantente alerta.", 5.5),
+                    ("IA: Detecto una boya de transmisión encriptada en el sector. Sugiero interceptarla para recabar más información.", 6.5)
                 ])
                 
         elif self.current_batch == 3:

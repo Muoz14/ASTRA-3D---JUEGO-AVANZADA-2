@@ -91,6 +91,7 @@ class AudioManager:
     def set_thruster_volume(self, volume):
         if self.thruster:
             if volume > 0 and not self.thruster.playing:
+                self.thruster.time = 0
                 self.thruster.play()
             self.thruster.volume = volume * self.ducking_multiplier
             if volume == 0 and self.thruster.playing:
@@ -99,6 +100,7 @@ class AudioManager:
     def set_engine_volume(self, volume):
         if self.engine_accel:
             if volume > 0 and not self.engine_accel.playing:
+                self.engine_accel.time = 0
                 self.engine_accel.play()
             self.engine_accel.volume = volume * self.ducking_multiplier
             if volume <= 0 and self.engine_accel.playing:
@@ -107,6 +109,7 @@ class AudioManager:
     def set_ship_flight_volume(self, volume):
         if self.ship_flight:
             if volume > 0 and not self.ship_flight.playing:
+                self.ship_flight.time = 0
                 self.ship_flight.play()
             self.ship_flight.volume = volume * self.ducking_multiplier
             if volume <= 0.05 and self.ship_flight.playing:
@@ -139,16 +142,22 @@ class AudioManager:
         Audio('assets/sounds/achievement_unlock.wav', autoplay=True, loop=False, volume=0.7, ignore_paused=True)
             
     def play_ambient(self):
-        if self.space_ambient and not self.space_ambient.playing:
-            self.space_ambient.play()
+        if self.space_ambient:
+            self.space_ambient.volume = 0.7 * self.ducking_multiplier
+            if not self.space_ambient.playing:
+                self.space_ambient.time = 0
+                self.space_ambient.play()
             
     def stop_ambient(self):
         if self.space_ambient and self.space_ambient.playing:
             self.space_ambient.stop()
             
     def play_menu_music(self):
-        if self.menu_music and not self.menu_music.playing:
-            self.menu_music.play()
+        if self.menu_music:
+            self.menu_music.volume = 0.5
+            if not self.menu_music.playing:
+                self.menu_music.time = 0
+                self.menu_music.play()
             
     def stop_menu_music(self):
         if self.menu_music and self.menu_music.playing:

@@ -5,7 +5,7 @@ import requests
 API_KEY = "2d5f09eebd5df59e135d7df3d51c463a64a33ce02e6758f7dab328eaef5e4cde"
 CHARLIE_ID = "IKne3meq5aSn9XLyUdCD"
 CALLUM_ID = "N2lVS1w4EtoT3dr4eOWO"
-NODRIZA_ID = "IKne3meq5aSn9XLyUdCD" # Reutilizamos Charlie para Nodriza temporalmente
+NODRIZA_ID = "nPczCjzI2devNBz1zQrb" # Voz de hombre mayor, profunda y resonante (Brian)
 
 HEADERS = {
     "Accept": "audio/mpeg",
@@ -38,9 +38,10 @@ STORY_DIALOGUES = [
     "IA: Sistemas en línea. Necesitamos calibrar la telemetría.",
     "Tierra: Piloto, dirígete a las coordenadas marcadas en tu HUD.",
     "Tierra: Piloto, excelente trabajo con la anomalía.",
-    "Tierra: Los datos sugieren tecnología de una facción humana clandestina...",
-    "Tierra: Se llaman 'Altech'. Están usando tecnología alienígena robada.",
-    "IA: Detecto una boya de transmisión de Altech cerca. Procedamos a interceptarla.",
+    "Tierra: Los datos extraídos apuntan a una organización llamada 'Altech'.",
+    "IA: Sus frecuencias no coinciden con ninguna base de datos conocida, Comando.",
+    "Tierra: Aún desconocemos quiénes son o su verdadero propósito. Mantente alerta.",
+    "IA: Detecto una boya de transmisión encriptada en el sector. Sugiero interceptarla para recabar más información.",
     "IA: Nuevas coordenadas detectadas en la transmisión.",
     "Tierra: Piloto, dirígete a esas coordenadas. Creemos que es un escuadrón de reconocimiento.",
     "Tierra: ¡Piloto! Hemos descifrado toda la información de Altech.",
@@ -57,8 +58,10 @@ def generate_story_audio():
         filepath = os.path.join(ASSETS_DIR, f"{file_hash}.mp3")
         
         if os.path.exists(filepath):
-            print(f"[{file_hash}] Ya existe, saltando: {text[:20]}...")
-            continue
+            # Forzamos la regeneración solo si es la nodriza (ya que acabamos de cambiar su voz)
+            if "Nodriza" not in text:
+                print(f"[{file_hash}] Ya existe, saltando: {text[:20]}...")
+                continue
             
         # Determinar Voice ID y limpiar prefijo
         clean_text = text
@@ -72,7 +75,7 @@ def generate_story_audio():
             voice_id = CHARLIE_ID
         elif text.startswith("Nodriza Altech: "):
             clean_text = text.replace("Nodriza Altech: ", "")
-            voice_id = CHARLIE_ID # Podríamos ponerle otro efecto luego
+            voice_id = NODRIZA_ID
             
         print(f"Generando [{file_hash}] -> {clean_text}")
         

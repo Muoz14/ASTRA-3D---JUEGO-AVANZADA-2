@@ -87,8 +87,8 @@ class AIDirector(Entity):
                 boss_alive = True
                 break
                 
-        # Detener spawn si estamos en lote 4 y el jefe murió
-        if mm and getattr(mm, 'current_batch', 0) == 4 and not boss_alive:
+        # Detener spawn si estamos en lote 4, el jefe YA spawneó, y ahora está muerto
+        if mm and getattr(mm, 'current_batch', 0) == 4 and getattr(mm, 'boss_spawned', False) and not boss_alive:
             # Si el jefe murió, NO spawneamos más refuerzos
             return
             

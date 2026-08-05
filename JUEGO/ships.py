@@ -9,7 +9,8 @@ class ShipConfig:
     def __init__(self, id, name, model, scale, menu_scale, ship_color, max_speed, boost_max_speed, 
                  acceleration, friction, laser_offsets, thruster_offsets, description,
                  model_rotation_offset=(0,0,0), thruster_scale=(0.3, 0.3, 3.5), max_health=100, laser_scale=(0.2, 0.2, 2.0),
-                 dummy_config=None, laser_color=color.red, thruster_color=color.rgba(0, 255, 255, 200), collider_size=(8, 4, 11)):
+                 dummy_config=None, laser_color=color.red, thruster_color=color.rgba(0, 255, 255, 200), collider_size=(8, 4, 11),
+                 camera_modes=None):
         self.id = id
         self.name = name
         self.model = model
@@ -30,6 +31,7 @@ class ShipConfig:
         self.laser_color = laser_color
         self.thruster_color = thruster_color
         self.collider_size = collider_size
+        self.camera_modes = camera_modes if camera_modes else [(0, 1.0, -9), (0, 1.5, -14), (0, 2.5, -20)]
 
 AVAILABLE_SHIPS = {
     "nave1": ShipConfig(
@@ -70,40 +72,11 @@ AVAILABLE_SHIPS = {
         max_health=150,                   # AGUANTA MÁS GOLPES
         laser_scale=(0.2, 0.2, 2.0),      # Tamaño ajustado temporalmente para tuning
         collider_size=(7, 3, 10),
-        dummy_config=DummyConfig(scale_normal=(1.2, 1.2, 1.2), scale_large=(6.5, 6.5, 6.5))
+        dummy_config=DummyConfig(scale_normal=(1.2, 1.2, 1.2), scale_large=(6.5, 6.5, 6.5)),
+        camera_modes=[(0, 1.5, -13), (0, 2.2, -19), (0, 3.5, -27)]
     ),
-    "nave-exploradora": ShipConfig(
-        id="nave-exploradora",
-        name="Nave Exploradora Neutral",
-        model='assets/nave_exploradora/nave-npc_neutral.glb',
-        scale=(3.00, 3.00, 3.00),
-        menu_scale=(3.00, 3.00, 3.00),
-        ship_color=color.white,
-        max_speed=60,
-        boost_max_speed=140,
-        acceleration=1.5,
-        friction=0.8,
-        laser_offsets=((-0.00, -0.20, -1.25), (0.00, -0.20, -1.25)),
-        thruster_offsets=[(-0.2667, 0.0333, -0.7333), (0.2667, 0.0333, -0.7333)],
-        thruster_scale=(0.38, 0.38, 0.37),
-        model_rotation_offset=(0.00, 90.00, 0.00),
-        description="Nave de exploración neutral. No posee armamento predeterminado, pero es excelente para recolección pasiva.",
-        max_health=100,
-        laser_scale=(0.2, 0.2, 2.0),      # Restaurado para que puedas afinar el "láser único"
-        thruster_color=color.orange,      # Propulsores naranjas
-        collider_size=(7, 3, 10),
-        dummy_config=DummyConfig(scale_normal=(1.0, 1.0, 1.0), scale_large=(2.0, 2.0, 2.0))
-    )
+    # "nave-exploradora" ha sido removida del diccionario por defecto para ser una nave secreta.
 }
 
-# --- INYECCIÓN TEMPORAL PARA TUNING ---
-try:
-    from enemy_ships import ENEMY_SHIPS
-    AVAILABLE_SHIPS["nave-alien-enemy"] = ENEMY_SHIPS["nave-alien-enemy"]
-    AVAILABLE_SHIPS["nave-altech-enemy"] = ENEMY_SHIPS["nave-altech-enemy"]
-    AVAILABLE_SHIPS["boss1-nodriza"] = ENEMY_SHIPS["boss1-nodriza"]
-except ImportError:
-    pass
-# --------------------------------------
 
 
