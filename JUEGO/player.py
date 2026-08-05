@@ -673,7 +673,9 @@ class PlayerShip(Entity):
             self.ai_companion.on_damage_taken()
         if getattr(self, 'achievements', None):
             self.achievements.register_damage_taken()
-        # El escudo absorbe el daño, si llega a 0 mueres
+        if hasattr(self, 'game_app') and hasattr(self.game_app, 'audio_manager'):
+            self.game_app.audio_manager.play_player_hit()
+
         self.shield -= amount
         self.shield = max(0, self.shield)
         self.shake_amount = clamp(self.shake_amount + 0.4, 0, 0.9)
@@ -714,6 +716,7 @@ class PlayerShip(Entity):
 
     def reset_ship(self):
         self.is_cinematic = False
+        self.boss_cinematic_triggered = False
         self.position = (0, 0, 0)
         self.rotation = (0, 0, 0)
         self.base_pitch = 0.0
@@ -760,9 +763,9 @@ class PlayerShip(Entity):
     def clear_persistent_ui(self):
         if hasattr(self, 'scanner') and self.scanner:
             self.scanner.clear_markers()
-            if hasattr(self, 'scanner', 'analyzing_text') and self.scanner.analyzing_text:
+            if hasattr(self, 'scanner') and hasattr(self.scanner, 'analyzing_text') and self.scanner.analyzing_text:
                 self.scanner.analyzing_text.enabled = False
-            if hasattr(self, 'scanner', 'scan_line') and self.scanner.scan_line:
+            if hasattr(self.scanner, 'scan_line') and self.scanner.scan_line:
                 self.scanner.scan_line.enabled = False
         if hasattr(self, 'oob_warning') and self.oob_warning:
             self.oob_warning.enabled = False
@@ -778,7 +781,8 @@ class PlayerShip(Entity):
                 closest_enemy = None
                 closest_dist = float('inf')
                 for e in __import__('ursina').scene.entities:
-                    if type(e).__name__ == 'EnemyShip' and getattr(e, 'faction', 'unknown') != 'npc' and not getattr(e, 'is_dead', False):
+                    is_valid_target = type(e).__name__ in ('EnemyShip', 'Mothership')
+                    if is_valid_target and getattr(e, 'faction', 'unknown') != 'npc' and not getattr(e, 'is_dead', False):
                         if (e.position - self.position).length() < 2000:
                             
                             dir_to_enemy = (e.position - self.position).normalized()
@@ -844,9 +848,25 @@ class PlayerShip(Entity):
             self.achievements.update(time.dt, self)
             
         target = getattr(self, 'mission_manager', None) and self.mission_manager.get_active_target()
-        if target and not self.is_cinematic and not self.is_dead and not application.paused:
-            if (self.world_position - target).length_squared() < 10000:
+        tracked = getattr(self, 'mission_manager', None) and self.mission_manager.get_tracked_mission()
+        
+        if target and tracked and not self.is_cinematic and not self.is_dead and not application.paused:
+            # Distancias personalizadas por misión
+            trigger_dist = 3000 * 3000 if tracked.id == "main_04" else 10000
+            
+            if (self.world_position - target).length_squared() < trigger_dist:
                 self.mission_prompt.enabled = True
+                
+                if tracked.id == "main_04":
+                    self.mission_prompt.text = "Área de combate alcanzada. Presiona [ 3 ] para iniciar."
+                    # Limpiamos el objetivo del HUD ya que estamos en la zona
+                    tracked.target_pos = None
+                elif tracked.id == "main_03" and getattr(self.mission_manager, 'altech_wreck_spawned', False):
+                    self.mission_prompt.text = "Presiona [X] para hackear la nave."
+                elif tracked.id == "main_02":
+                    self.mission_prompt.text = "Presiona [X] para intervenir baliza."
+                else:
+                    self.mission_prompt.text = "Presiona [X] para analizar objetivo."
             else:
                 self.mission_prompt.enabled = False
         else:
@@ -1050,6 +1070,19 @@ class PlayerShip(Entity):
         self.current_speed = lerp(self.current_speed, self.target_speed, time.dt * lerp_factor)
 
         speed_ratio = clamp(abs(self.current_speed) / self.boost_max_speed, 0, 1)
+        if hasattr(self, 'game_app') and hasattr(self.game_app, 'audio_manager'):
+            if is_boosting:
+                self.game_app.audio_manager.set_thruster_volume(speed_ratio * 0.6)
+                self.game_app.audio_manager.set_engine_volume(0)
+            elif held_keys['w']:
+                self.game_app.audio_manager.set_thruster_volume(0)
+                self.game_app.audio_manager.set_engine_volume(speed_ratio * 0.6)
+            else:
+                self.game_app.audio_manager.set_thruster_volume(0)
+                self.game_app.audio_manager.set_engine_volume(0)
+                
+            self.game_app.audio_manager.set_ship_flight_volume(0.2 + (speed_ratio * 0.5))
+            
         target_fov = self.base_fov + (speed_ratio * 35.0)
         camera.fov = lerp(camera.fov, target_fov, time.dt * 5)
 
@@ -1242,6 +1275,8 @@ class PlayerShip(Entity):
             if self.overheat_text.enabled: self.overheat_text.enabled = False
 
         if held_keys['left mouse'] and not self.overheated and self.fire_timer <= 0:
+            if hasattr(self, 'game_app') and hasattr(self.game_app, 'audio_manager'):
+                self.game_app.audio_manager.play_laser()
             true_aim_rotation = Vec3(self.base_pitch, self.rotation_y, self.rotation_z)
             from weapons import DualLaser
             
@@ -1314,11 +1349,8 @@ class PlayerShip(Entity):
                             if hasattr(self.game_app, 'hack_altech_wreck'):
                                 self.game_app.hack_altech_wreck()
                             return
-                    elif mm and not mm.altech_squad_spawned:
-                        if dist_sq < 250000: # 500m aprox
-                            if hasattr(self.game_app, 'start_altech_squad_cinematic'):
-                                self.game_app.start_altech_squad_cinematic()
-                            return
+                    # El escuadrón se activa automáticamente por proximidad, no por X
+                    return
 
             # 2. Comportamiento normal del escáner
             if getattr(self.scanner, 'active', False):
@@ -1329,10 +1361,21 @@ class PlayerShip(Entity):
                 self.scanner.toggle()
         if key == '3':
             mm = getattr(self, 'mission_manager', None)
-            if mm and getattr(mm, 'waiting_for_boss', False) and not self.boss_cinematic_triggered:
-                if hasattr(self.game_app, 'start_boss_cinematic'):
-                    self.boss_cinematic_triggered = True
-                    self.game_app.start_boss_cinematic()
+            if mm and getattr(mm, 'current_batch', 0) == 4 and not getattr(self, 'boss_cinematic_triggered', False):
+                # Verificar que el jugador esté cerca de las coordenadas de la batalla final
+                dist_to_coords = (self.world_position - Vec3(5000, 1000, -5000)).length()
+                if dist_to_coords < 3000:
+                    # Desactivar el tracker visual
+                    mm.tracked_mission_id = None
+                    mm.ui.update_ui()
+                    
+                    if hasattr(self.game_app, 'start_boss_cinematic'):
+                        self.boss_cinematic_triggered = True
+                        self.game_app.start_boss_cinematic()
+                else:
+                    if not hasattr(self, 'boss_warning') or not self.boss_warning.enabled:
+                        self.boss_warning = Text(text="Estás muy lejos de las coordenadas para el asalto final.", position=(0, -0.3), origin=(0,0), scale=1.5, color=color.orange)
+                        destroy(self.boss_warning, delay=2.0)
         if key == 'u':
             if not self.is_dead and not self.is_cinematic and not self.pause_menu_open and not getattr(self.tactical_map, 'is_open', False) and not getattr(self.inventory, 'is_open', False):
                 self.upgrades_ui.toggle()

@@ -108,7 +108,7 @@ class Asteroid(Entity):
         if self.tier == 1:
             next_tier = 2; pieces = 2
         elif self.tier == 2:
-            next_tier = 3; pieces = 3
+            next_tier = 3; pieces = 2 # Reducido de 3 a 2 para mejor rendimiento
         else:
             pieces = 0
 
@@ -125,13 +125,14 @@ class Asteroid(Entity):
             
         # Si es de tier 3, soltamos el fragmento
         if self.tier == 3 and getattr(self.manager, 'player', None):
-            # Soltar 1 o 2 fragmentos
-            for _ in range(random.randint(1, 2)):
+            # Soltar 2 a 3 fragmentos como recompensa
+            for _ in range(random.randint(2, 3)):
                 MeteoriteFragment(self.manager.player, self.position, self.mat_data)
                 
         if getattr(self.manager, 'player', None) and hasattr(self.manager.player, 'mission_manager'):
-            self.manager.player.mission_manager.increment_mission('sec_01')
-
+            # Los asteroides no cuentan para la misión de combate (sec_01).
+            pass
+            
         if self in self.manager.asteroids: self.manager.asteroids.remove(self)
         if hasattr(self, 'pool'):
             self.pool.return_object(self)

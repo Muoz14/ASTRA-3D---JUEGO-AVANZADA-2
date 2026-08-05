@@ -14,6 +14,9 @@ class DummyMissionManager:
     def complete_mission(self, ms_id):
         pass
         
+    def increment_mission(self, ms_id, amount=1):
+        pass
+        
     def set_mission_progress(self, ms_id, progress):
         pass
         
@@ -28,6 +31,15 @@ class DummyCompanion:
         self.ui = Entity()
     def trigger_dialogue(self, dialogues):
         print(f"DIALOGO: {dialogues}")
+        
+    def on_damage_taken(self):
+        pass
+        
+    def on_boost_activated(self):
+        pass
+        
+    def on_weapon_overheated(self):
+        pass
 
 class DummyGameApp:
     def __init__(self):
@@ -50,9 +62,15 @@ game_app.player = player
 # Cinematics
 altech_cine = AltechSquadCinematic(player, game_app)
 boss_cine = BossIntroCinematic(player, game_app)
+boss_cine = BossIntroCinematic(player, game_app)
 
 def update():
     pass
+
+def trigger_altech():
+    print(">> Triggering Altech Cinematic via Proximity!")
+    altech_cine.is_playing = False
+    altech_cine.play()
 
 def input(key):
     if key == '1':
@@ -67,9 +85,16 @@ def input(key):
         print(">> Limpiando naves de prueba")
         from ursina import scene, destroy
         for e in list(scene.entities):
-            if type(e).__name__ == 'EnemyShip' or type(e).__name__ == 'Mothership':
+            if type(e).__name__ in ['EnemyShip', 'Mothership', 'RoamingDummySquad']:
                 destroy(e)
+    if key == '3':
+        print(">> Instanciando RoamingDummySquad en target_pos")
+        from cinematics import RoamingDummySquad
+        target = Vec3(8000, 2000, -8000)
+        # Situamos al jugador lejos para que se pueda acercar
+        player.position = target - Vec3(0, 0, 2000)
+        squad = RoamingDummySquad(player, game_app, target, trigger_altech)
 
-Text(text="1: Test Escuadrón Altech | 2: Test Nodriza | 0: Limpiar Escena", position=(-0.85, 0.45))
+Text(text="1: Test Altech | 2: Test Nodriza | 3: Spawn Roaming | 0: Limpiar", position=(-0.85, 0.45))
 
 app.run()

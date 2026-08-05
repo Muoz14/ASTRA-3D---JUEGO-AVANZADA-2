@@ -118,9 +118,21 @@ class WaypointArrow(Entity):
     def update(self):
         hide_ui = application.paused or not getattr(self.player, 'enabled', True) or getattr(self.player, 'is_cinematic', False) or getattr(self.player, 'pause_menu_open', False) or getattr(self.player.tactical_map, 'is_open', False) or getattr(self.player, 'is_dead', False)
         
+        # Check Win Condition for Batch 4 (Boss Fight)
+        if getattr(self.manager, 'current_batch', 0) == 4 and getattr(self.manager, 'boss_spawned', False):
+            from enemy import EnemyShip
+            boss_alive = any(getattr(e, 'is_boss', False) and not getattr(e, 'is_dead', False) for e in EnemyShip.active_ships)
+            altech_alive = any(not getattr(e, 'is_dead', False) and getattr(e, 'faction', '') != 'npc' for e in EnemyShip.active_ships)
+            
+            if not boss_alive and not altech_alive and not getattr(self.player, 'is_cinematic', False):
+                if hasattr(self.player.game_app, 'start_ending_cinematic') and not getattr(self.manager, 'ending_triggered', False):
+                    self.manager.ending_triggered = True
+                    self.player.game_app.start_ending_cinematic()
+        
         if hide_ui:
             self.arrow.enabled = False
             self.distance_text.enabled = False
+            self.secondary_text.enabled = False
             if hasattr(self, 'world_diamond'): self.world_diamond.enabled = False
             return
         tracked = self.manager.get_tracked_mission()
@@ -188,6 +200,14 @@ class MissionManager(Entity):
         self.missions.clear()
         self.current_batch = 1
         self.tracked_mission_id = None
+        
+        # Limpiar flags de lotes avanzados
+        self.altech_squad_spawned = False
+        self.altech_wreck_spawned = False
+        self.altech_wreck_hacked = False
+        self.waiting_for_boss = False
+        self.altech_squad_kills = 0
+        
         self.ui.update_ui()
 
     def add_mission(self, id, title, description, short_description=None, target_pos=None, is_main=True, max_progress=0):
@@ -254,7 +274,6 @@ class MissionManager(Entity):
                 # Check if all missions in the current batch are completed
                 if all(miss.completed for miss in self.missions):
                     invoke(self.advance_batch, delay=5.0)
-                    
                 return
                 
     def advance_batch(self):
@@ -262,7 +281,48 @@ class MissionManager(Entity):
         self.missions.clear()
         self.tracked_mission_id = None
         
-        if self.current_batch == 2:
+        if self.current_batch == 1:
+            print(f"[MISSIONS] advance_batch(1) ejecutado! ai_companion={hasattr(self.player, 'ai_companion')}")
+            self.add_mission(
+                id="main_01",
+                title="Sincronización de Sensores",
+                description="Alcanza las coordenadas marcadas para calibrar los sistemas de navegación de la nave.",
+                short_description="Ve al punto de calibración.",
+                target_pos=Vec3(291, 950, 2193),
+                is_main=True
+            )
+            self.add_mission(
+                id="sec_01",
+                title="Entrenamiento de Combate",
+                description="Destruye 5 naves enemigas básicas para familiarizarte con los sistemas de armas.",
+                short_description="Destruye 5 enemigos.",
+                is_main=False,
+                max_progress=5
+            )
+            self.add_mission(
+                id="sec_02",
+                title="Recolección de Recursos",
+                description="Destruye asteroides o naves y recolecta 20 unidades de chatarra estelar.",
+                short_description="Recolecta 20 de chatarra.",
+                is_main=False,
+                max_progress=20
+            )
+            self.add_mission(
+                id="sec_03",
+                title="Exploración Profunda",
+                description="Acumula 5000 metros de distancia de vuelo para probar los propulsores.",
+                short_description="Vuela 5000m.",
+                is_main=False,
+                max_progress=5000
+            )
+            if hasattr(self.player, 'ai_companion'):
+                print("[MISSIONS] trigger_dialogue llamado!")
+                self.player.ai_companion.trigger_dialogue([
+                    ("IA: Sistemas en línea. Necesitamos calibrar la telemetría.", 3.0),
+                    ("Tierra: Piloto, dirígete a las coordenadas marcadas en tu HUD.", 4.0)
+                ])
+                
+        elif self.current_batch == 2:
             self.player.survival_timer = 0.0
             self.add_mission(
                 id="main_02",
@@ -323,16 +383,16 @@ class MissionManager(Entity):
                 title="Escuadrón Altech",
                 description="Intercepta al escuadrón de reconocimiento Altech en las coordenadas indicadas.",
                 short_description="Intercepta escuadrón Altech.",
-                target_pos=Vec3(8000, 2000, -8000),
+                target_pos=Vec3(3000, 500, 4000), # Traerlo mucho más cerca
                 is_main=True
             )
             self.add_mission(
                 id="sec_07",
                 title="Depuración Total",
-                description="Destruye a 15 naves enemigas.",
-                short_description="Destruye 15 enemigos.",
-                is_main=False,
-                max_progress=15
+                description="Destruye a 45 naves enemigas.",
+                short_description="Destruye 45 enemigos.",
+                is_main=True,
+                max_progress=45
             )
             
             self.altech_squad_spawned = False
@@ -345,6 +405,28 @@ class MissionManager(Entity):
                 self.player.ai_companion.trigger_dialogue([
                     ("IA: Nuevas coordenadas detectadas en la transmisión.", 3.5),
                     ("Tierra: Piloto, dirígete a esas coordenadas. Creemos que es un escuadrón de reconocimiento.", 5.0)
+                ])
+                
+            if hasattr(self.player, 'game_app') and hasattr(self.player.game_app, 'spawn_roaming_squad'):
+                self.player.game_app.spawn_roaming_squad(Vec3(3000, 500, 4000))
+                
+        elif self.current_batch == 4:
+            self.add_mission(
+                id="main_04",
+                title="Asalto Final",
+                description="Acércate a las coordenadas y utiliza el equipo de radiofrecuencias.",
+                short_description="Utiliza el equipo de radiofrecuencias. [PRESIONA 3]",
+                target_pos=Vec3(5000, 1000, -5000), # Posición de la batalla final
+                is_main=True
+            )
+            
+            self.boss_spawned = False
+            
+            if hasattr(self.player, 'ai_companion'):
+                self.player.ai_companion.trigger_dialogue([
+                    ("Tierra: ¡Piloto! Hemos descifrado toda la información de Altech.", 4.5),
+                    ("Tierra: Su Nave Nodriza está en camino. Dirígete a las coordenadas marcadas.", 5.0),
+                    ("IA: Coordenadas cargadas. Prepárate para combate extremo. Presiona [ 3 ] al llegar.", 5.5)
                 ])
         
     def get_tracked_mission(self):

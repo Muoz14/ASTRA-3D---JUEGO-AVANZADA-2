@@ -79,6 +79,12 @@ class MeteoriteFragment(Entity):
         
         self.lifespan -= time.dt
         
+        # Despawn si se aleja mucho del jugador (mejora de rendimiento)
+        if hasattr(self, 'player') and self.player:
+            dist_to_player = distance(self.position, self.player.position)
+            if dist_to_player > 1000:
+                self.lifespan = 0 # Forzar destrucción rápida
+        
         # Alerta visual (parpadeo rápido en los últimos 5 segundos)
         if self.lifespan < 5.0 and self.lifespan > 0:
             self.visible = (int(self.lifespan * 10) % 2 == 0)

@@ -59,12 +59,16 @@ class CompanionManager(Entity):
         self.idle_timer = 0.0
         self.idle_interval = random.uniform(2.0, 5.0)
         
+        self.audio_player = None
+        self._waiting_for_tts = False
+        self._tts_request_time = 0.0
+        self._tts_actually_started = False
+        self._in_story_dialogue = False
+        self.story_queue = []
+        
         self.initial_delay_finished = False
         self.initial_delay_timer = 0.0
         
-        self._waiting_for_tts = False
-        self._tts_actually_started = False
-        self.audio_player = None
         self._was_paused = False
 
     def _get_player(self):
@@ -83,9 +87,6 @@ class CompanionManager(Entity):
         
         player = self._get_player()
         is_cine = getattr(player, 'is_cinematic', False) if player else False
-        
-        if getattr(self, '_in_story_dialogue', False):
-            return
             
         if application.paused or is_cine:
             if not self._was_paused:
@@ -108,6 +109,11 @@ class CompanionManager(Entity):
             if self.audio_player:
                 self.audio_player.stop()
                 self.audio_player = None
+            
+                # --- STOP AUDIO DUCKING ---
+                player = self._get_player()
+                if player and hasattr(player, 'game_app') and hasattr(player.game_app, 'audio_manager'):
+                    player.game_app.audio_manager.set_ducking(False)
             self._waiting_for_tts = False
             self.initial_delay_finished = False
             self.initial_delay_timer = 0.0
@@ -137,7 +143,11 @@ class CompanionManager(Entity):
             self._tts_actually_started = True
             self._audio_confirmed_playing = False
             self._audio_start_time = time.time()
-
+            
+            # --- START AUDIO DUCKING ---
+            player = self._get_player()
+            if player and hasattr(player, 'game_app') and hasattr(player.game_app, 'audio_manager'):
+                player.game_app.audio_manager.set_ducking(True)
         # Lógica de sincronización del pop-up visual con la voz de la IA
         if self._waiting_for_tts:
             # Seguro general: Si el archivo nunca existió, cerramos la ventana rápido y abortamos
@@ -169,6 +179,31 @@ class CompanionManager(Entity):
                 self._audio_confirmed_playing = False
                 if self.audio_player:
                     self.audio_player.stop()
+                    
+                # --- STOP AUDIO DUCKING ---
+                player = self._get_player()
+                if player and hasattr(player, 'game_app') and hasattr(player.game_app, 'audio_manager'):
+                    player.game_app.audio_manager.set_ducking(False)
+                    
+        # --- PROCESAR COLA DE HISTORIA ---
+        print(f"[EXTREME DEBUG] _in_story: {getattr(self, '_in_story_dialogue', False)}, wait: {self._waiting_for_tts}, cine: {getattr(self._get_player(), 'is_cinematic', 'N/A')}, queue: {len(getattr(self, 'story_queue', []))}")
+        
+        if getattr(self, '_in_story_dialogue', False):
+                
+            if not self._waiting_for_tts:
+                player = self._get_player()
+                # Validamos que el jugador no esté en una cinemática
+                is_cinematic = getattr(player, 'is_cinematic', False)
+                if not is_cinematic:
+                    if getattr(self, 'story_queue', []):
+                        # Hay textos pendientes: reproducimos el siguiente
+                        next_text = self.story_queue.pop(0)
+                        print(f"[DEBUG AI] Pop story text: {next_text}")
+                        self._play_story_line(next_text)
+                    else:
+                        # Se acabaron los diálogos y no está hablando
+                        print(f"[DEBUG AI] Fin de la historia.")
+                        self._end_story_dialogue()
         
         if self.idle_timer >= self.idle_interval:
             self.idle_timer = 0.0
@@ -180,6 +215,11 @@ class CompanionManager(Entity):
                 self._trigger_event("idle")
 
     def _trigger_event(self, event_type, ignore_cooldown=False):
+        # Prioridad Absoluta: Si estamos en medio de una transmisión de la historia, 
+        # bloqueamos TODOS los eventos aleatorios (daño, turbo, idle, recolección).
+        if getattr(self, '_in_story_dialogue', False):
+            return
+            
         current_time = time.time()
         
         if not ignore_cooldown and (current_time - self.last_message_time) < self.cooldown:
@@ -262,26 +302,32 @@ class CompanionManager(Entity):
         self.idle_timer = 0.0 # reset idle
 
     def trigger_dialogue(self, dialogue_sequence):
-        # dialogue_sequence is a list of tuples: (text, duration)
-        from ursina import invoke
+        # dialogue_sequence is a list of tuples: (text, duration). 
+        # Convertimos a una lista simple de textos, ya que la duración será dinámica según el audio.
+        self.story_queue = [item[0] if isinstance(item, tuple) else item for item in dialogue_sequence]
         self._in_story_dialogue = True
-        self.ui.enabled = True
         self._was_paused = False
-        
-        current_delay = 0.0
-        for text, duration in dialogue_sequence:
-            invoke(self._play_story_line, text, delay=current_delay)
-            current_delay += duration
-            
-        invoke(self._end_story_dialogue, delay=current_delay)
         
     def _play_story_line(self, text):
         if self.audio_player:
             self.audio_player.stop()
-        self.ui.show_message(text, title_text="[ COMUNICACIÓN ENTRANTE ]")
+            
+        # Determinar el título basado en el texto
+        title = "[ COMUNICACIÓN ENTRANTE ]"
+        if text.startswith("Tierra: "):
+            title = "[ COMANDO DE TIERRA ]"
+        elif text.startswith("IA: "):
+            title = "[ IA DE LA NAVE ]"
+            
+        self.ui.enabled = True
+        self.ui.show_message(text, title_text=title)
+        
         from menu import GameSettings
         if getattr(GameSettings, 'ai_voice_enabled', True):
             self.tts.speak(text)
+            self._waiting_for_tts = True
+            self._tts_actually_started = False
+            self._tts_request_time = time.time()
             
     def _end_story_dialogue(self):
         self._in_story_dialogue = False

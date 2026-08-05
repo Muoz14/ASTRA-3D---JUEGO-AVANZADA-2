@@ -14,7 +14,7 @@
         "combate_veterano": false,
         "supervivencia_preciso": false,
         "exploracion_nomada": false,
-        "scanner_rastreador": true,
+        "scanner_rastreador": false,
         "recursos_prospector": false,
         "ingenieria_avanzada": false,
         "velocidad_turbo": false,

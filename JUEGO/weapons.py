@@ -177,7 +177,7 @@ class DualLaser(Entity):
             impact_position = hit_info.world_point if hit_info.hit else hit_entity.position
             
             is_critical = False
-            if hit_entity and type(hit_entity).__name__ == 'EnemyShip':
+            if hit_entity and type(hit_entity).__name__ in ('EnemyShip', 'Mothership'):
                 # Check directional damage: if laser and enemy are pointing roughly the same way, it's a rear hit
                 if self.forward.dot(hit_entity.forward) > 0.5:
                     is_critical = True
@@ -199,11 +199,23 @@ class DualLaser(Entity):
                 else:
                     ExplosionParticle(pos=impact_position)
 
+            is_asteroid = hasattr(hit_entity, 'is_asteroid') and hit_entity.is_asteroid
+            am = None
+            if pool and hasattr(pool, 'game_app') and hasattr(pool.game_app, 'audio_manager'):
+                am = pool.game_app.audio_manager
+            elif hasattr(self, 'owner') and hasattr(self.owner, 'game_app') and hasattr(self.owner.game_app, 'audio_manager'):
+                am = self.owner.game_app.audio_manager
+                
+            if am:
+                if is_asteroid:
+                    am.play_hit_asteroid(volume=0.6)
+                else:
+                    am.play_hit_ship(volume=0.6)
+
             # Apply damage
             if hit_entity and hit_entity.enabled:
                 if hasattr(hit_entity, 'split') and hasattr(hit_entity, 'is_asteroid'):
-                    for _ in range(self.damage_level):
-                        hit_entity.split()
+                    hit_entity.split()
                 else:
                     final_damage = self.damage_level * 2.5 if is_critical else self.damage_level
                     hit_entity.take_damage(final_damage)

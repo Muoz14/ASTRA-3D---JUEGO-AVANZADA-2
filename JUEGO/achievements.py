@@ -495,6 +495,11 @@ class AchievementManager(Entity):
         self.unlocked[ach_id] = True
         self.save()
         self.popup_queue.append(achievement)
+        
+        # Reproducir sonido de logro
+        if hasattr(self, 'player') and hasattr(self.player, 'game_app') and hasattr(self.player.game_app, 'audio_manager'):
+            self.player.game_app.audio_manager.play_achievement()
+            
         if self.active_popup is None:
             self._show_next_popup()
         print(f"[Logros]: Desbloqueado -> {achievement['nombre']}")

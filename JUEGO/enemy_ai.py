@@ -165,7 +165,12 @@ class FindTargetAction(Action):
         player = getattr(entity, 'player', None)
         if player and not getattr(player, 'is_dead', True):
             dist = distance(entity.position, player.position)
-            if dist <= self.detection_radius:
+            
+            # Si ya detectó al jugador alguna vez, nunca lo pierde de vista
+            already_detected = getattr(entity, 'has_detected_player', False)
+            
+            if dist <= self.detection_radius or already_detected:
+                entity.has_detected_player = True
                 closest_target = player
                 closest_dist = dist
                 
@@ -204,19 +209,58 @@ class DogfightAction(Action):
             return NodeStatus.FAILURE
             
         # EVASIÓN DE OBSTÁCULOS (Prioridad Máxima)
-        from ursina import raycast
-        # Lanzar rayo hacia adelante para detectar asteroides o el planeta
-        hit_info = raycast(entity.world_position, entity.forward, distance=150, ignore=(entity,))
+        from ursina import raycast, distance
+        
+        # 1. Evasión matemática estricta para el planeta gigante (por si spawnean adentro o el raycast falla)
+        if hasattr(entity.game, 'environment') and hasattr(entity.game.environment, 'planet'):
+            planet = entity.game.environment.planet
+            if planet and getattr(planet, 'enabled', True):
+                dist_to_planet = distance(entity.world_position, planet.world_position)
+                if dist_to_planet < 2200: # El radio real del collider es mayor
+                    # Evadir directamente alejándose del centro del planeta
+                    avoid_dir = (entity.world_position - planet.world_position).normalized()
+                    target_pos = entity.position + avoid_dir * 2500
+                    smooth_look_at(entity, target_pos, speed=8.0)
+                    entity.target_speed = entity.config.max_speed * 0.4
+                    return NodeStatus.RUNNING
+                    
+                # 1.5 Evasión matemática para asteroides gigantes (chunks)
+                if hasattr(planet, 'chunks'):
+                    for chunk in planet.chunks.children:
+                        chunk_pos = chunk.world_position
+                        ast_radius = 150 * chunk.scale_x
+                        if distance(entity.world_position, chunk_pos) < ast_radius + 50:
+                            avoid_dir = (entity.world_position - chunk_pos).normalized()
+                            target_pos = entity.position + avoid_dir * (ast_radius * 2)
+                            smooth_look_at(entity, target_pos, speed=9.0)
+                            entity.target_speed = entity.config.max_speed * 0.3
+                            return NodeStatus.RUNNING
+
+        # 2. Raycast para asteroides y otros obstáculos menores
+        hit_info = raycast(entity.world_position, entity.forward, distance=400, ignore=(entity,))
         if hit_info.hit and hit_info.entity != target:
             # Si vamos a chocar, la prioridad absoluta es esquivar
             avoid_dir = hit_info.world_normal
             # Girar agresivamente hacia la normal de la superficie (rebotar visualmente)
-            target_pos = entity.position + avoid_dir * 500
-            smooth_look_at(entity, target_pos, speed=4.0)
-            entity.target_speed = entity.config.max_speed * 0.8
+            target_pos = entity.position + avoid_dir * 1000
+            smooth_look_at(entity, target_pos, speed=8.0)
+            entity.target_speed = entity.config.max_speed * 0.3
             return NodeStatus.RUNNING
             
         dist = distance(entity.position, target.position)
+        
+        # CONCIENCIA DE PROXIMIDAD: Si estamos a más de 900m del jugador, volver hacia él
+        player = getattr(entity, 'player', None)
+        if player and not getattr(player, 'is_dead', False):
+            dist_to_player = distance(entity.world_position, player.world_position)
+            if dist_to_player > 900:
+                # Cancelar cualquier táctica y volver hacia el jugador
+                smooth_look_at(entity, player.position, speed=4.0)
+                entity.target_speed = entity.config.max_speed
+                entity._tactic = "ENGAGE"  # Forzar modo ataque
+                entity._is_breaking = False
+                return NodeStatus.RUNNING
+        
         is_breaking = getattr(entity, "_is_breaking", False)
         
         import time
@@ -263,15 +307,15 @@ class DogfightAction(Action):
             entity._tactic = random.choice(options)
             
             if entity._tactic == "REPOSITION":
-                # Irse lejos: un punto aleatorio a 300-500m (reducido para no huir tanto)
+                # Irse a un punto cercano (100-250m) para no salirse del rango del jugador
                 offsets = [target.forward, target.right, -target.right, target.up, -target.up]
                 chosen = random.choice(offsets)
-                entity._tactic_target = target.position + chosen * random.uniform(300, 500)
+                entity._tactic_target = target.position + chosen * random.uniform(100, 250)
             elif entity._tactic == "FLANK":
-                # Atacar desde un flanco o de frente (joust)
+                # Atacar desde un flanco (100-300m)
                 offsets = [target.right, -target.right, target.up, -target.up, target.forward]
                 chosen = random.choice(offsets)
-                entity._tactic_target = target.position + chosen * random.uniform(200, 400)
+                entity._tactic_target = target.position + chosen * random.uniform(100, 300)
                 
         entity._tactic_timer -= time.dt
         
@@ -287,9 +331,13 @@ class DogfightAction(Action):
                 entity.position += entity.right * (entity._strafe_dir * entity.config.max_speed * 0.3) * time.dt
                 
         elif entity._tactic == "REPOSITION":
-            # Volar hacia el punto de reposicionamiento, IGNORANDO al jugador visualmente
-            smooth_look_at(entity, entity._tactic_target, speed=1.0)
-            entity.target_speed = entity.config.max_speed * 1.2 # Huir rápido
+            # Volar hacia el punto de reposicionamiento, pero ENCARANDO al jugador
+            # Calculamos la dirección del movimiento hacia el target
+            dir_to_target = (entity._tactic_target - entity.position).normalized()
+            entity.position += dir_to_target * (entity.config.max_speed * 0.8) * time.dt
+            # Visualmente seguimos apuntando al jugador para disparar y no darle la espalda
+            smooth_look_at(entity, target.position, speed=1.5)
+            
             # Si llegó al punto o está muy lejos del jugador, cambiar a ENGAGE
             if distance(entity.position, entity._tactic_target) < 100 or dist > 800:
                 entity._tactic = "ENGAGE"
@@ -326,8 +374,8 @@ class MaintainDistanceAction(Action):
         smooth_look_at(entity, target.position, speed=1.0)
         
         if dist < self.min_dist:
-            # Muy cerca, retroceder (velocidad negativa)
-            entity.target_speed = -getattr(entity, 'max_speed', 50)
+            # Muy cerca, retroceder (velocidad negativa reducida para que sea más natural)
+            entity.target_speed = -getattr(entity, 'max_speed', 50) * 0.3
         elif dist > self.max_dist:
             # Muy lejos, avanzar
             entity.target_speed = getattr(entity, 'max_speed', 50)
@@ -510,18 +558,24 @@ class PatrolAction(Action):
         
         # Generar nuevo waypoint si no hay
         if not target_waypoint:
-            origin = blackboard.get("spawn_point", Vec3(0,0,0))
+            # Usar la posición del jugador como origen para no alejarse
+            player = getattr(entity, 'player', None)
+            if player and not getattr(player, 'is_dead', False):
+                origin = player.world_position
+            else:
+                origin = blackboard.get("spawn_point", entity.position)
+            
             offset = Vec3(random.uniform(-self.patrol_radius, self.patrol_radius),
                           random.uniform(-self.patrol_radius, self.patrol_radius),
                           random.uniform(-self.patrol_radius, self.patrol_radius))
             target_waypoint = origin + offset
             
-            # Mantener dentro del universo
-            player = getattr(entity, 'player', None)
-            max_bound = player.sector_radius - 2000 if player else 30000
-            target_waypoint.x = max(-max_bound, min(max_bound, target_waypoint.x))
-            target_waypoint.y = max(-max_bound, min(max_bound, target_waypoint.y))
-            target_waypoint.z = max(-max_bound, min(max_bound, target_waypoint.z))
+            # Asegurar que el waypoint no quede a más de 900m del jugador
+            if player:
+                dist_check = distance(target_waypoint, player.world_position)
+                if dist_check > 900:
+                    pull_dir = (target_waypoint - player.world_position).normalized()
+                    target_waypoint = player.world_position + pull_dir * random.uniform(300, 700)
             
             blackboard.set("patrol_waypoint", target_waypoint)
             
@@ -651,7 +705,7 @@ def build_basic_fighter_tree(detection_radius=1000):
             FollowLeaderAction()
         ]),
         MineAsteroidAction(),
-        PatrolAction(patrol_radius=800)
+        PatrolAction(patrol_radius=500)
     ])
 
 def build_boss_tree():

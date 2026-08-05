@@ -36,7 +36,8 @@ class HudMenuButton(Entity):
             pressed_color=color.hex('#061526'),
             text_color=color.white,
             on_click=on_click,
-            z=-0.05
+            z=-0.05,
+            ignore_paused=kwargs.get('ignore_paused', False)
         )
         Entity(parent=self, model='quad', color=border_color, scale=(0.018, 0.004), position=(-0.222, y), z=-0.12)
         Entity(parent=self, model='quad', color=border_color, scale=(0.018, 0.004), position=(0.222, y), z=-0.12)
@@ -115,13 +116,13 @@ class PauseMenu(Entity):
              origin=(0, 0), position=(0, 0.052), scale=0.92, color=color.hex('#D8E7F0'), z=-0.30)
 
         HudMenuButton(parent=self, text='REANUDAR VUELO', y=-0.050, on_click=self.resume,
-                      accent='#00EFFF', primary=True, z=-0.25)
+                      accent='#00EFFF', primary=True, z=-0.25, ignore_paused=True)
         HudMenuButton(parent=self, text='LOGROS', y=-0.138, on_click=self.open_achievements,
-                      accent='#4AA3C7', z=-0.25)
+                      accent='#4AA3C7', z=-0.25, ignore_paused=True)
         HudMenuButton(parent=self, text='OPCIONES', y=-0.226, on_click=self.open_options,
-                      accent='#4AA3C7', z=-0.25)
+                      accent='#4AA3C7', z=-0.25, ignore_paused=True)
         HudMenuButton(parent=self, text='SALIR AL MENÚ', y=-0.314, on_click=self.return_to_main_menu,
-                      accent='#FF4D5A', danger=True, z=-0.25)
+                      accent='#FF4D5A', danger=True, z=-0.25, ignore_paused=True)
 
     def resume(self):
         application.paused = False
@@ -341,7 +342,6 @@ class GameApp:
         window.center_on_screen()
         window.color = color.black
         window.title = "Astra 3D"
-        window.fps_counter.enabled = True
         window.exit_button.visible = False
 
         # Plano de renderizado seguro para evitar el quiebre de profundidad
@@ -370,7 +370,7 @@ class GameApp:
         from pool_manager import ObjectPool
         self.pool = ObjectPool()
         
-        self.environment = AsteroidManager(player=self.player, count=120, radius=2500, pool=self.pool)
+        self.environment = AsteroidManager(player=self.player, count=90, radius=1000, pool=self.pool)
         self.space_dust = SpaceDustManager(player=self.player, count=100, radius=80)
         self.intro_cinematic = IntroCinematic(self.player)
         
@@ -387,6 +387,11 @@ class GameApp:
         self.ai_director.enabled = False
 
         self.player.enabled = False
+        
+        # --- INITIALIZE AUDIO MANAGER ---
+        from audio_manager import AudioManager
+        self.audio_manager = AudioManager()
+        self.audio_manager.play_menu_music()
         self.space_dust.enabled = False
         self.environment.clear_asteroids() # No mostrar asteroides en el menú
         mouse.locked = False
@@ -455,6 +460,10 @@ class GameApp:
     def start_actual_game(self, ship_id="nave1"):
         window.color = color.black
         
+        if hasattr(self, 'audio_manager'):
+            self.audio_manager.stop_menu_music()
+            self.audio_manager.play_ambient()
+            
         # Aplicar ajustes gráficos
         window.vsync = GameSettings.vsync
         self.cosmic_bg.enabled = True
@@ -476,35 +485,22 @@ class GameApp:
         self.player.change_ship(ship_id)
         self.player.reset_ship()
         
-        self.ai_director.enabled = True
-        self.ai_director.spawn_timer = 2.0 # Spawn squad shortly after starting
+        # NO encender el AI Director todavía, para que no salgan enemigos durante la cinemática
+        self.ai_director.enabled = False
         
-        # Iniciar Misiones directamente en el Lote 2 (Para Pruebas)
+        # Iniciar Misiones (se resetan y quedan listas en Lote 0)
         self.mission_manager.reset()
-        self.mission_manager.current_batch = 1
-        self.mission_manager.advance_batch()
+        self.mission_manager.current_batch = 0
+        # advance_batch() se llamará al terminar la cinemática
         
         self.mission_manager.ui.enable()
         self.mission_manager.waypoint.enable()
         
-        # Saltamos la cinemática para probar
-        # self.intro_cinematic.play()
+        # Reproducimos la cinemática inicial del juego
+        # La cinemática misma se encarga de habilitar al jugador, posicionar la cámara y mostrar el HUD al finalizar.
+        self.intro_cinematic.play()
         
-        self.player.enabled = True
-        self.player.position = (0, 0, 0)
-        self.player.rotation = (0, 0, 0)
-        
-        from ursina import camera
-        camera.parent = self.player.camera_pivot
-        camera.position = self.player.camera_modes[self.player.current_cam_index]
-        camera.world_rotation = (0, 0, 0)
-        camera.rotation = (0, 0, 0)
-        
-        self.player.is_cinematic = False
-        if hasattr(self.player, 'hud_container'):
-            self.player.hud_container.enable()
-        if hasattr(self.player, 'ai_companion') and hasattr(self.player.ai_companion, 'ui'):
-            self.player.ai_companion.ui.enabled = True
+        mouse.locked = True
             
         mouse.locked = True
 
@@ -526,14 +522,29 @@ class GameApp:
                 ("Tierra: Fabrica todo lo que puedas. Necesitaremos armas para lo que se avecina.", 5.5)
             ])
 
+    def spawn_roaming_squad(self, target_pos):
+        from cinematics import RoamingDummySquad
+        # Detonamos la cinemática usando nuestra propia función cuando se acercan a 1500m
+        self.roaming_squad = RoamingDummySquad(self.player, self, target_pos, self.start_altech_squad_cinematic)
+
     def start_altech_squad_cinematic(self):
         from cinematics import AltechSquadCinematic
         from ursina import scene, destroy
         
+        # Pausar spawn de IA durante la cinemática
+        if hasattr(self, 'ai_director'):
+            self.ai_director.boss_fight_active = True
+            
         # Limpiar enemigos actuales del mapa
         for e in list(scene.entities):
             if type(e).__name__ == 'EnemyShip' and getattr(e, 'faction', None) != 'npc':
                 destroy(e)
+                
+        # Limpiar exceso de asteroides para rendimiento
+        if hasattr(self, 'environment'):
+            while len(self.environment.asteroids) > 30:
+                ast = self.environment.asteroids.pop()
+                destroy(ast)
                 
         if not hasattr(self, 'altech_squad_cinematic'):
             self.altech_squad_cinematic = AltechSquadCinematic(self.player, self)
@@ -578,17 +589,13 @@ class GameApp:
             destroy(self.altech_wreck)
             self.altech_wreck = None
             
-        # Al hackear, completamos el objetivo de interceptar
+        # Al hackear, completamos el objetivo principal del Lote 3
         self.mission_manager.complete_mission("main_03")
-        
-        # Esperamos a que terminen todo el lote 3
-        self.mission_manager.waiting_for_boss = True
         
         if hasattr(self.player, 'ai_companion'):
             self.player.ai_companion.trigger_dialogue([
                 ("IA: Descargando base de datos táctica de Altech...", 4.0),
-                ("Tierra: Piloto, tengo las coordenadas de su Nave Nodriza principal.", 4.5),
-                ("Tierra: Termina tus tareas pendientes. Cuando estés listo, presiona [ 3 ] para ir a las coordenadas.", 6.5)
+                ("Tierra: Excelente. Ahora termina las misiones pendientes.", 4.5),
             ])
             
     def start_boss_cinematic(self):
@@ -616,10 +623,32 @@ class GameApp:
                 
         self.boss_cinematic.play()
 
+    def start_ending_cinematic(self):
+        from ending_cinematic import EndingCinematic
+        from ursina import scene, destroy
+        
+        # Limpiar enemigos restantes
+        for e in list(scene.entities):
+            if type(e).__name__ == 'EnemyShip':
+                destroy(e)
+                
+        if not hasattr(self, 'ending_cinematic'):
+            self.ending_cinematic = EndingCinematic(self.player, self)
+            
+        self.ending_cinematic.play()
+
     def return_to_main_menu(self):
+        if hasattr(self, 'audio_manager'):
+            self.audio_manager.stop_ambient()
+            self.audio_manager.play_menu_music()
+            
         self.intro_cinematic.stop_and_clear()
         self.mission_manager.ui.disable()
         self.mission_manager.waypoint.disable()
+        
+        # Reiniciar misiones para que vuelvan al estado original al volver a jugar
+        self.mission_manager.reset()
+        self.mission_manager.current_batch = 0
         
         if hasattr(self, 'save_pilot_stats') and hasattr(self.player, 'is_dead') and not self.player.is_dead:
             self.save_pilot_stats(int(self.player.session_score), int(self.player.session_time))
@@ -690,6 +719,11 @@ class GameApp:
             self.player.inventory.toggle()
         if hasattr(self.player, 'inventory'):
             self.player.inventory.clear_inventory()
+            
+        # Reiniciar misiones por completo y reactivarlas (ya que la intro no se repite al revivir)
+        self.mission_manager.reset()
+        self.mission_manager.current_batch = 0
+        self.mission_manager.advance_batch()
             
         self.achievement_manager.reset_run()
         self.player.reset_ship()
