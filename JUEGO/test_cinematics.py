@@ -94,7 +94,12 @@ def input(key):
         # Situamos al jugador lejos para que se pueda acercar
         player.position = target - Vec3(0, 0, 2000)
         squad = RoamingDummySquad(player, game_app, target, trigger_altech)
+    if key == '4':
+        print(">> Test Boss (IA de Juego Final)")
+        from enemy import EnemyShip
+        # Aparece a distancia segura y usa su árbol de comportamientos oficial
+        boss = EnemyShip("boss1-nodriza", player.position + player.forward * 1800, game_app, is_boss=True)
 
-Text(text="1: Test Altech | 2: Test Nodriza | 3: Spawn Roaming | 0: Limpiar", position=(-0.85, 0.45))
+Text(text="1: Test Altech | 2: Test Nodriza | 3: Spawn Roaming | 4: Test Super Láser | 0: Limpiar", position=(-0.85, 0.45))
 
 app.run()

@@ -52,7 +52,10 @@ class EnemyShip(Entity):
         self.target_speed = 0
         self.current_speed = 0
         
-        self.fire_rate = 0.35 # Dispara cada 0.35 segundos (más agresivo)
+        self.fire_rate = 0.35 # Dispara cada 0.35 segundos (cazas normales)
+        if getattr(self, 'is_boss', False):
+            self.fire_rate = 1.2 # La nodriza dispara mucho más lento su láser normal
+            
         self.fire_cooldown = 0
         
         self.max_heat = 100.0
@@ -65,6 +68,10 @@ class EnemyShip(Entity):
         self.player = None
         self.max_boost_fuel = 100.0
         self.boost_fuel = 100.0
+        
+        self.is_charging_super_attack = False
+        self.is_locked_aim = False
+        self.super_laser_telegraph = None
         
         EnemyShip.active_ships.append(self)
         
@@ -151,13 +158,13 @@ class EnemyShip(Entity):
             from ursina import Entity, Vec3
             dummy = Entity(position=self.position)
             
-            # Error aleatorio mínimo (Casi AimBot) para obligar al jugador a usar dashes
-            err_range = 1.0 # Reducido de 2.5 a 1.0
+            # Error aleatorio (menos precisión para que no parezca Aimbot)
+            err_range = 2.0 # Subido de 1.0 a 2.0 para naves enemigas normales
             
-            # La nodriza ahora tiene precisión perfecta a medida que pierde salud
+            # La nodriza ahora tiene mucha menos precisión para dar oportunidad de esquivar
             if getattr(self, 'is_boss', False):
                 health_percent = getattr(self, 'health', 1) / max(getattr(self, 'max_health', 1), 1)
-                err_range = 0.8 * health_percent # De 0.8 baja a 0.0
+                err_range = 5.0 * health_percent # Mayor error aún (de 3.0 a 5.0)
                 
             error_offset = Vec3(random.uniform(-err_range, err_range), random.uniform(-err_range, err_range), random.uniform(-err_range, err_range))
             
@@ -204,11 +211,87 @@ class EnemyShip(Entity):
             minion = EnemyShip(minion_id, spawn_pos, self.game, is_boss=False, is_minion=True)
             
     def fire_homing_laser(self, target):
-        # A desarrollar después: el super láser teledirigido.
-        # Por ahora, simplemente dispara una ráfaga masiva hacia adelante
-        self.shoot()
-        self.shoot()
-        self.shoot()
+        if getattr(self, 'is_charging_super_attack', False):
+            return
+            
+        self.is_charging_super_attack = True
+        self.target_speed = 0
+        
+        # Crear la línea del telégrafo (Láser BLANCO semitransparente)
+        self.super_laser_telegraph = Entity(
+            parent=self, 
+            model='cube', 
+            origin=(0, 0, -0.5), 
+            scale=(2.5, 2.5, 30000), 
+            position=(0, -5.0, 100), # Nace exactamente del cañón (pos local)
+            color=color.rgba(255, 255, 255, 80), # Blanco
+            unlit=True,
+            z=-1
+        )
+        
+        # Función para hacer que el rayo apunte al jugador mágicamente desde el cañón
+        def update_telegraph():
+            if getattr(self, 'is_dead', False):
+                if hasattr(self, 'super_laser_telegraph') and self.super_laser_telegraph:
+                    destroy(self.super_laser_telegraph)
+                    self.super_laser_telegraph = None
+                return
+                
+            if not getattr(self, 'super_laser_telegraph', None):
+                return
+                
+            # Mientras no esté bloqueado, el láser gira de forma independiente para apuntar al jugador
+            if not getattr(self, 'is_locked_aim', False) and target:
+                self.super_laser_telegraph.look_at(target.world_position)
+                
+        self.super_laser_telegraph.update = update_telegraph
+        
+        # Secuencia Ajustada (Evitar injusticias):
+        # 0.0s a 2.0s: El láser blanco persigue al jugador.
+        # 2.0s a 2.5s: El láser sigue blanco pero se BLOQUEA (deja de perseguir).
+        # 2.5s a 3.5s: El láser se vuelve ROJO amenazante en ese mismo lugar (1 segundo extra de aviso).
+        # 3.5s: Dispara.
+        
+        self.is_locked_aim = False
+        # Se bloquea en la última posición a los 2.0s
+        invoke(setattr, self, 'is_locked_aim', True, delay=2.0)
+        # Cambia a rojo a los 2.5s
+        invoke(setattr, self.super_laser_telegraph, 'color', color.rgba(255, 50, 50, 160), delay=2.5)
+        
+        # Dispara a los 3.5s (2.5s de blanco + 1.0s de rojo)
+        invoke(self._fire_super_laser, delay=3.5)
+        
+    def _fire_super_laser(self):
+        if getattr(self, 'is_dead', False):
+            return
+            
+        self.is_charging_super_attack = False
+        self.is_locked_aim = False
+        
+        # Sonido de disparo pesado
+        if hasattr(self.game, 'audio_manager'):
+            self.game.audio_manager.play_enemy_laser()
+            
+        if self.super_laser_telegraph:
+            beam = self.super_laser_telegraph
+            self.super_laser_telegraph = None
+            
+            # Convertirlo en un rayo letal
+            beam.color = color.red
+            beam.collider = 'box'
+            
+            # Animar su desaparición (más rápido)
+            beam.animate_color(color.rgba(255, 0, 0, 0), duration=0.8, curve=curve.out_expo)
+            beam.animate_scale((0, 0, 12000), duration=0.8, curve=curve.out_expo)
+            
+            def update_beam():
+                if beam.intersects(self.game.player).hit:
+                    self.game.player.take_damage(9999) # Daño letal masivo
+            beam.update = update_beam
+            
+            # Limpiar el rayo e indicar que terminó la carga
+            destroy(beam, delay=0.8)
+            invoke(setattr, self, 'is_charging_super_attack', False, delay=0.8)
             
     def take_damage(self, amount):
         self.health -= amount
@@ -287,6 +370,9 @@ class EnemyShip(Entity):
         destroy(self)
 
     def on_destroy(self):
+        if getattr(self, 'super_laser_telegraph', None):
+            destroy(self.super_laser_telegraph)
+            self.super_laser_telegraph = None
         if hasattr(self, 'visual_marker') and self.visual_marker:
             destroy(self.visual_marker)
         if self in EnemyShip.active_ships:

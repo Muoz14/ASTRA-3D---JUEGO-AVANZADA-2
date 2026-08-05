@@ -80,7 +80,7 @@ class DualLaser(Entity):
         self.position = ship_position + self.center_offset + (ship_forward * offset_z)
         self.rotation = ship_rotation
         self.scale = kwargs.get('laser_scale', (0.2, 0.2, 2.0))
-        self.speed = 200
+        self.speed = kwargs.get('speed', 200)
         self.lifetime = 2.0
         self.age = 0.0
 

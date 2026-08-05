@@ -120,10 +120,10 @@ class Inverter(BTNode):
         return status
 
 class Cooldown(BTNode):
-    def __init__(self, cooldown_time, child):
+    def __init__(self, cooldown_time, child, start_on_cooldown=True):
         self.cooldown_time = cooldown_time
         self.child = child
-        self.last_execution_time = 0
+        self.last_execution_time = time.time() if start_on_cooldown else 0
         
     def tick(self, entity, blackboard):
         current_time = time.time()
@@ -650,10 +650,27 @@ class ChargeHomingLaserAction(Action):
         if not target:
             return NodeStatus.FAILURE
             
-        # Apunta y dispara el Homing Laser (se implementará en la entidad)
+        # Inicializar contador de disparos si no existe
+        if not hasattr(entity, '_super_laser_shots_fired'):
+            entity._super_laser_shots_fired = 0
+            
+        if getattr(entity, 'is_charging_super_attack', False):
+            # Rotar suavemente hacia el objetivo si no está con la mira bloqueada
+            if not getattr(entity, 'is_locked_aim', False):
+                smooth_look_at(entity, target.position, speed=1.5)
+            return NodeStatus.RUNNING
+            
+        # Si ya disparó 2 veces, terminamos el ataque y entra en cooldown de 30s
+        if entity._super_laser_shots_fired >= 2:
+            entity._super_laser_shots_fired = 0
+            return NodeStatus.SUCCESS # SUCCESS reinicia el Cooldown
+            
+        # Inicia la secuencia del Homing Laser (Super Ataque) y cuenta 1 disparo
         if hasattr(entity, 'fire_homing_laser'):
+            entity._super_laser_shots_fired += 1
             entity.fire_homing_laser(target)
-            return NodeStatus.SUCCESS
+            return NodeStatus.RUNNING
+            
         return NodeStatus.FAILURE
 
 # ==========================================
@@ -709,7 +726,7 @@ def build_boss_tree():
             FindTargetAction(detection_radius=6000),
             Selector([
                 Cooldown(15.0, SpawnMinionsAction("nave-altech-enemy", 3)),
-                Cooldown(8.0, ChargeHomingLaserAction()),
+                Cooldown(30.0, ChargeHomingLaserAction()),
                 Parallel([
                     MaintainDistanceAction(min_distance=800, max_distance=1200),
                     Sequence([
